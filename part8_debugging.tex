@@ -1,0 +1,629 @@
+%==============================================================================
+% PART 8: DEBUGGING & MANISKILL INTEGRATION
+%==============================================================================
+
+\section{Debugging \& ManiSkill Integration}
+
+%------------------------------------------------------------------------------
+\begin{frame}{ManiSkill Integration Overview}
+    \begin{block}{Challenge}
+        Adapting RDT2 from real robots to ManiSkill simulation
+    \end{block}
+
+    \vspace{0.5cm}
+    \textbf{Key Differences:}
+    \begin{itemize}
+        \item Camera configuration (fisheye vs pinhole)
+        \item Action space representation
+        \item Coordinate frames and conventions
+        \item Control frequency and latency
+    \end{itemize}
+
+    \vspace{0.3cm}
+    \begin{alertblock}{Focus Areas}
+        1. Image preprocessing \\
+        2. Action dimension mapping \\
+        3. Normalization/Unnormalization \\
+        4. Coordinate transformations
+    \end{alertblock}
+\end{frame}
+
+%------------------------------------------------------------------------------
+\begin{frame}{Debugging Checklist}
+    \textbf{When model outputs incorrect actions:}
+
+    \vspace{0.3cm}
+    \begin{enumerate}
+        \item[$\square$] \textbf{Image Format}
+              \begin{itemize}
+                  \item Resolution: $384 \times 384$ per camera
+                  \item Concatenation: Left-Right horizontal
+                  \item Color space: RGB (not BGR)
+                  \item Data type: uint8 $[0, 255]$
+              \end{itemize}
+
+        \item[$\square$] \textbf{Normalization}
+              \begin{itemize}
+                  \item Correct normalizer file loaded
+                  \item Actions normalized before encoding
+                  \item Actions unnormalized after decoding
+              \end{itemize}
+
+        \item[$\square$] \textbf{Token Conversion}
+              \begin{itemize}
+                  \item VLA $\rightarrow$ VAE: $V - (t + 1)$
+                  \item Clamping to $[0, 1023]$
+              \end{itemize}
+    \end{enumerate}
+\end{frame}
+
+%------------------------------------------------------------------------------
+\begin{frame}{Debugging Checklist (cont.)}
+    \begin{enumerate}
+        \setcounter{enumi}{3}
+        \item[$\square$] \textbf{Action Dimensions}
+              \begin{itemize}
+                  \item Position: indices [0:3, 10:13]
+                  \item Rotation: indices [3:9, 13:19] (6D)
+                  \item Gripper: indices [9, 19]
+              \end{itemize}
+
+        \item[$\square$] \textbf{Coordinate Frame}
+              \begin{itemize}
+                  \item Robot base frame vs world frame
+                  \item TCP offset correctness
+                  \item Left-right arm transformation
+              \end{itemize}
+
+        \item[$\square$] \textbf{Rotation Representation}
+              \begin{itemize}
+                  \item 6D rotation (not quaternion/euler)
+                  \item Gram-Schmidt orthonormalization
+                  \item Correct conversion to rotation matrix
+              \end{itemize}
+    \end{enumerate}
+\end{frame}
+
+%------------------------------------------------------------------------------
+\begin{frame}{Common Issue: Image Format}
+    \begin{block}{Symptom}
+        Model outputs random/incorrect actions regardless of input
+    \end{block}
+
+    \vspace{0.3cm}
+    \textbf{Correct Format:}
+    \begin{lstlisting}[language=Python, basicstyle=\ttfamily\small]
+# Per camera: [384, 384, 3] RGB uint8
+left_img = cv2.resize(left_raw, (384, 384))
+left_img = cv2.cvtColor(left_img, cv2.COLOR_BGR2RGB)
+
+right_img = cv2.resize(right_raw, (384, 384))
+right_img = cv2.cvtColor(right_img, cv2.COLOR_BGR2RGB)
+
+# Concatenate horizontally
+combined = np.concatenate([left_img, right_img], axis=1)
+# Result: [384, 768, 3]
+    \end{lstlisting}
+
+    \vspace{0.3cm}
+    \textbf{Common Mistakes:}
+    \begin{itemize}
+        \item BGR instead of RGB (OpenCV default)
+        \item Wrong resize order (width vs height)
+        \item Vertical instead of horizontal concatenation
+    \end{itemize}
+\end{frame}
+
+%------------------------------------------------------------------------------
+\begin{frame}{Common Issue: Normalizer Mismatch}
+    \begin{block}{Symptom}
+        Actions are scaled incorrectly (too large/small)
+    \end{block}
+
+    \vspace{0.3cm}
+    \textbf{Diagnosis:}
+    \begin{lstlisting}[language=Python, basicstyle=\ttfamily\small]
+# Check normalizer statistics
+print("Action stats:")
+print(f"  Scale: {normalizer['action'].scale}")
+print(f"  Offset: {normalizer['action'].offset}")
+print(f"  Mode: {normalizer['action'].mode}")
+
+# Verify range after normalization
+norm_action = normalizer["action"].normalize(action)
+print(f"Normalized range: [{norm_action.min()}, "
+      f"{norm_action.max()}]")
+# Should be roughly [-1, 1] for "limits" mode
+    \end{lstlisting}
+
+    \vspace(0.3cm)
+    \textbf{Solution:}
+    \begin{itemize}
+        \item Use normalizer trained on same data distribution
+        \item Create new normalizer from ManiSkill dataset
+    \end{itemize}
+\end{frame}
+
+%------------------------------------------------------------------------------
+\begin{frame}{Common Issue: Token Conversion}
+    \begin{block}{Symptom}
+        High invalid token rate, decoder errors
+    \end{block}
+
+    \vspace(0.3cm)
+    \textbf{Correct Conversion:}
+    \begin{lstlisting}[language=Python, basicstyle=\ttfamily\small]
+vocab_size = 152064  # Qwen2.5-VL vocabulary
+
+# VLA token -> VAE token
+vae_token = vocab_size - (vla_token + 1)
+
+# Clamp to valid range
+vae_token = torch.clamp(vae_token, 0, 1023)
+
+# Check valid rate
+valid_mask = (vae_token >= 0) & (vae_token < 1024)
+valid_rate = valid_mask.float().mean()
+print(f"Valid rate: {valid_rate:.2%}")
+
+# Should be >95% for well-trained model
+    \end{lstlisting}
+\end{frame}
+
+%------------------------------------------------------------------------------
+\begin{frame}{Common Issue: Rotation Format}
+    \begin{block}{Symptom}
+        Position correct but orientation wrong
+    \end{block}
+
+    \vspace(0.3cm)
+    \textbf{6D Rotation Verification:}
+    \begin{lstlisting}[language=Python, basicstyle=\ttfamily\small]
+def rot6d_to_matrix(rot6d):
+    """Convert 6D rotation to 3x3 matrix."""
+    a1, a2 = rot6d[..., :3], rot6d[..., 3:6]
+
+    # Gram-Schmidt orthonormalization
+    b1 = F.normalize(a1, dim=-1)
+    b2 = a2 - (b1 * a2).sum(-1, keepdim=True) * b1
+    b2 = F.normalize(b2, dim=-1)
+    b3 = torch.cross(b1, b2, dim=-1)
+
+    return torch.stack([b1, b2, b3], dim=-2)
+
+# Verify orthonormality
+R = rot6d_to_matrix(rot6d)
+I = R @ R.transpose(-1, -2)  # Should be identity
+det = torch.det(R)           # Should be 1
+    \end{lstlisting}
+\end{frame}
+
+%------------------------------------------------------------------------------
+\begin{frame}{Common Issue: Coordinate Frame}
+    \begin{block}{Symptom}
+        Actions are mirrored, inverted, or offset
+    \end{block}
+
+    \vspace(0.3cm)
+    \textbf{Key Transformations to Check:}
+
+    \vspace(0.3cm)
+    \begin{enumerate}
+        \item \textbf{Camera-to-Robot Transform}
+              \begin{itemize}
+                  \item Wrist camera frame vs robot base frame
+                  \item Check \code{tx\_tracker\_to\_tcp} matrix
+              \end{itemize}
+
+        \item \textbf{Left-Right Robot Transform}
+              \begin{itemize}
+                  \item Bimanual coordination
+                  \item Check \code{tx\_left\_right} matrix
+              \end{itemize}
+
+        \item \textbf{World Frame Convention}
+              \begin{itemize}
+                  \item Z-up vs Y-up
+                  \item Right-handed vs left-handed
+              \end{itemize}
+    \end{enumerate}
+\end{frame}
+
+%------------------------------------------------------------------------------
+\begin{frame}{Debugging Tool: Action Visualization}
+    \begin{lstlisting}[language=Python, basicstyle=\ttfamily\small]
+def visualize_action_chunk(action):
+    """Plot action trajectory for debugging."""
+    import matplotlib.pyplot as plt
+
+    fig, axes = plt.subplots(4, 1, figsize=(12, 10))
+
+    # Position (right arm)
+    axes[0].plot(action[:, 0:3])
+    axes[0].set_title("Right Arm Position")
+    axes[0].legend(['x', 'y', 'z'])
+
+    # Rotation (right arm) - first 3 of 6D
+    axes[1].plot(action[:, 3:6])
+    axes[1].set_title("Right Arm Rotation (6D[:3])")
+
+    # Gripper (right arm)
+    axes[2].plot(action[:, 9])
+    axes[2].set_title("Right Gripper")
+
+    # Repeat for left arm...
+    plt.tight_layout()
+    plt.savefig("action_debug.png")
+    \end{lstlisting}
+\end{frame}
+
+%------------------------------------------------------------------------------
+\begin{frame}{Debugging Tool: Step-by-Step Trace}
+    \begin{lstlisting}[language=Python, basicstyle=\ttfamily\scriptsize]
+def debug_inference(model, vae, normalizer, obs, instruction):
+    # 1. Image preprocessing
+    img = preprocess_image(obs)
+    print(f"Image shape: {img.shape}, dtype: {img.dtype}")
+    print(f"Image range: [{img.min()}, {img.max()}]")
+
+    # 2. Token generation
+    tokens = model.generate(...)
+    print(f"Generated tokens: {tokens.shape}")
+    print(f"Token range: [{tokens.min()}, {tokens.max()}]")
+
+    # 3. Token conversion
+    vae_tokens = convert_to_vae(tokens)
+    valid = (vae_tokens >= 0) & (vae_tokens < 1024)
+    print(f"Valid tokens: {valid.sum()}/{len(valid)}")
+
+    # 4. VAE decode
+    action_norm = vae.decode(vae_tokens)
+    print(f"Normalized action range: "
+          f"[{action_norm.min():.3f}, {action_norm.max():.3f}]")
+
+    # 5. Unnormalize
+    action = normalizer["action"].unnormalize(action_norm)
+    print(f"Action range: [{action.min():.3f}, {action.max():.3f}]")
+    \end{lstlisting}
+\end{frame}
+
+%------------------------------------------------------------------------------
+\begin{frame}{ManiSkill Adaptation: Camera Setup}
+    \textbf{RDT2 expects wrist-mounted fisheye cameras:}
+
+    \vspace(0.3cm)
+    \begin{table}
+        \centering
+        \renewcommand{\arraystretch}{1.3}
+        \begin{tabular}{lcc}
+            \toprule
+            \textbf{Aspect} & \textbf{RDT2 (Real)} & \textbf{ManiSkill} \\
+            \midrule
+            Camera type & Fisheye & Pinhole \\
+            Mount & Wrist & Configurable \\
+            Resolution & $384 \times 384$ & Variable \\
+            FOV & Wide ($\sim$180$^\circ$) & Narrow \\
+            \bottomrule
+        \end{tabular}
+    \end{table}
+
+    \vspace(0.3cm)
+    \textbf{Adaptation Options:}
+    \begin{itemize}
+        \item Mount cameras at wrist in ManiSkill
+        \item Apply fisheye distortion to pinhole images
+        \item Fine-tune model on ManiSkill images
+    \end{itemize}
+\end{frame}
+
+%------------------------------------------------------------------------------
+\begin{frame}{ManiSkill Adaptation: Action Space}
+    \textbf{RDT2 action format:}
+    \begin{itemize}
+        \item 20-dim bimanual (10 per arm)
+        \item Position (3) + Rotation 6D (6) + Gripper (1)
+        \item Relative actions (delta from current pose)
+    \end{itemize}
+
+    \vspace(0.3cm)
+    \textbf{ManiSkill action format:}
+    \begin{itemize}
+        \item Varies by environment
+        \item Often joint space or delta EE
+        \item May use quaternion rotation
+    \end{itemize}
+
+    \vspace(0.3cm)
+    \textbf{Conversion Required:}
+    \begin{lstlisting}[language=Python, basicstyle=\ttfamily\small]
+# RDT2 action -> ManiSkill action
+def convert_action(rdt2_action, env):
+    pos = rdt2_action[..., :3]
+    rot_6d = rdt2_action[..., 3:9]
+    rot_mat = rot6d_to_matrix(rot_6d)
+    rot_quat = matrix_to_quaternion(rot_mat)
+    grip = rdt2_action[..., 9]
+    # Convert to env-specific format
+    \end{lstlisting}
+\end{frame}
+
+%------------------------------------------------------------------------------
+\begin{frame}{ManiSkill Adaptation: Franka Setup}
+    \textbf{Franka-specific considerations:}
+
+    \vspace(0.3cm)
+    \begin{itemize}
+        \item \textbf{7-DoF arm:} Nullspace redundancy
+        \item \textbf{Torque control:} Different from position control
+        \item \textbf{Gripper:} Parallel jaw, $[0, 0.04]$m range
+    \end{itemize}
+
+    \vspace(0.3cm)
+    \textbf{Key Configuration:}
+    \begin{lstlisting}[language=Python, basicstyle=\ttfamily\small]
+# ManiSkill Franka setup
+robot = FrankaRobot()
+robot.set_control_mode("ee_delta_pose")
+
+# Gripper rescaling for Franka
+franka_gripper_range = 0.04  # meters
+umi_gripper_range = 0.088    # meters
+scale = franka_gripper_range / umi_gripper_range
+action[..., 9] *= scale      # Right gripper
+action[..., 19] *= scale     # Left gripper
+    \end{lstlisting}
+\end{frame}
+
+%------------------------------------------------------------------------------
+\begin{frame}{Key Files for Debugging}
+    \begin{table}
+        \centering
+        \renewcommand{\arraystretch}{1.2}
+        \footnotesize
+        \begin{tabular}{ll}
+            \toprule
+            \textbf{File} & \textbf{Purpose} \\
+            \midrule
+            \code{utils.py} & \code{batch\_predict\_action}, preprocessing \\
+            \code{models/normalizer/} & Normalization logic \\
+            \code{vqvae/models/multivqvae.py} & Token encode/decode \\
+            \code{models/rdt\_inferencer.py} & FM inference wrapper \\
+            \code{deploy/inference\_real\_*.py} & Real robot inference \\
+            \code{deploy/umi/real\_world/} & Robot controllers \\
+            \code{configs/rdt/post\_train.yaml} & Model config \\
+            \code{configs/robots/*.yaml} & Robot configs \\
+            \bottomrule
+        \end{tabular}
+    \end{table}
+\end{frame}
+
+%------------------------------------------------------------------------------
+\begin{frame}{Dimension Reference Card}
+    \begin{table}
+        \centering
+        \renewcommand{\arraystretch}{1.2}
+        \footnotesize
+        \begin{tabular}{lll}
+            \toprule
+            \textbf{Variable} & \textbf{Shape} & \textbf{Description} \\
+            \midrule
+            Image (per camera) & $[384, 384, 3]$ & RGB uint8 \\
+            Image (combined) & $[384, 768, 3]$ & Left-Right concat \\
+            Action chunk & $[24, 20]$ & 24 frames, 20-dim \\
+            Action tokens & $[27]$ & VQVAE output \\
+            State & $[1, 20]$ & Current robot state \\
+            Normalizer scale & $[20]$ & Per-dimension scale \\
+            Normalizer offset & $[20]$ & Per-dimension offset \\
+            \bottomrule
+        \end{tabular}
+    \end{table}
+
+    \vspace(0.3cm)
+    \textbf{Action Indices:}
+    \begin{itemize}
+        \item Right arm: [0:10] (pos [0:3], rot [3:9], grip [9])
+        \item Left arm: [10:20] (pos [10:13], rot [13:19], grip [19])
+    \end{itemize}
+\end{frame}
+
+%------------------------------------------------------------------------------
+\begin{frame}{Token Reference Card}
+    \begin{table}
+        \centering
+        \renewcommand{\arraystretch}{1.2}
+        \begin{tabular}{lcc}
+            \toprule
+            \textbf{Component} & \textbf{Indices} & \textbf{Tokens} \\
+            \midrule
+            Position & [0:18] & 18 \\
+            Rotation & [18:27] & 9 \\
+            Gripper & [27:30] $\rightarrow$ [24:27] & 3 \\
+            \midrule
+            \textbf{Total} & & \textbf{27} \\
+            \bottomrule
+        \end{tabular}
+    \end{table}
+
+    \vspace(0.3cm)
+    \textbf{Conversion Formulas:}
+    \begin{align*}
+        t_{\text{vae}} &= V_{\text{vocab}} - (t_{\text{vla}} + 1) \\
+        t_{\text{vla}} &= V_{\text{vocab}} - t_{\text{vae}} - 1
+    \end{align*}
+    where $V_{\text{vocab}} = 152064$ and valid $t_{\text{vae}} \in [0, 1023]$
+\end{frame}
+
+%------------------------------------------------------------------------------
+\begin{frame}{Troubleshooting Flowchart}
+    \begin{center}
+    \begin{tikzpicture}[
+        box/.style={rectangle, draw, rounded corners, minimum width=2cm, minimum height=0.6cm, align=center, font=\scriptsize},
+        decision/.style={diamond, draw, aspect=2, minimum width=2cm, align=center, font=\scriptsize},
+        arrow/.style={->, thick},
+        scale=0.7, transform shape
+    ]
+        \node[box, fill=blue!20] (start) at (0,5) {Model outputs\\incorrect actions};
+
+        \node[decision, fill=yellow!30] (valid) at (0,3) {Valid token\\rate $>$95\%?};
+
+        \node[box, fill=red!30] (token_fix) at (-4,1.5) {Check token\\conversion};
+        \node[decision, fill=yellow!30] (range) at (4,3) {Action range\\reasonable?};
+
+        \node[box, fill=red!30] (norm_fix) at (4,1) {Check\\normalizer};
+        \node[decision, fill=yellow!30] (orient) at (8,3) {Position\\correct?};
+
+        \node[box, fill=red!30] (coord_fix) at (8,1) {Check coord\\frame/TCP};
+        \node[box, fill=red!30] (rot_fix) at (12,3) {Check 6D\\rotation};
+
+        \draw[arrow] (start) -- (valid);
+        \draw[arrow] (valid) -- node[left] {No} (token_fix);
+        \draw[arrow] (valid) -- node[above] {Yes} (range);
+        \draw[arrow] (range) -- node[left] {No} (norm_fix);
+        \draw[arrow] (range) -- node[above] {Yes} (orient);
+        \draw[arrow] (orient) -- node[left] {No} (coord_fix);
+        \draw[arrow] (orient) -- node[above] {Yes} (rot_fix);
+    \end{tikzpicture}
+    \end{center}
+\end{frame}
+
+%------------------------------------------------------------------------------
+\begin{frame}{Testing Procedure}
+    \textbf{Step-by-step verification:}
+
+    \vspace(0.3cm)
+    \begin{enumerate}
+        \item \textbf{Sanity Check: Identity Action}
+              \begin{itemize}
+                  \item Feed action = current state
+                  \item Model should output near-zero deltas
+              \end{itemize}
+
+        \item \textbf{Single Dimension Test}
+              \begin{itemize}
+                  \item Move only X position
+                  \item Verify only X changes in action
+              \end{itemize}
+
+        \item \textbf{Known Trajectory}
+              \begin{itemize}
+                  \item Execute recorded human demo
+                  \item Compare model output to ground truth
+              \end{itemize}
+
+        \item \textbf{Full Task Execution}
+              \begin{itemize}
+                  \item Run complete manipulation task
+                  \item Evaluate success rate
+              \end{itemize}
+    \end{enumerate}
+\end{frame}
+
+%------------------------------------------------------------------------------
+\begin{frame}{Creating Custom Normalizer}
+    \textbf{For ManiSkill data:}
+
+    \vspace(0.3cm)
+    \begin{lstlisting}[language=Python, basicstyle=\ttfamily\small]
+from models.normalizer import LinearNormalizer
+
+# Collect action statistics from dataset
+all_actions = []
+for episode in dataset:
+    all_actions.append(episode['actions'])
+all_actions = np.concatenate(all_actions, axis=0)
+
+# Create normalizer
+normalizer = LinearNormalizer()
+normalizer.fit({'action': all_actions}, mode='limits')
+
+# Save
+normalizer.save("maniskill_normalizer.pt")
+
+# Or create manually
+scale = 1.0 / (action_max - action_min)
+offset = -action_min * scale
+    \end{lstlisting}
+\end{frame}
+
+%------------------------------------------------------------------------------
+\begin{frame}{Performance Benchmarks}
+    \begin{table}
+        \centering
+        \renewcommand{\arraystretch}{1.3}
+        \begin{tabular}{lccc}
+            \toprule
+            \textbf{Model} & \textbf{GPU} & \textbf{Latency} & \textbf{Real-time?} \\
+            \midrule
+            RDT2-VQ & RTX 4090 & $\sim$400ms & No \\
+            RDT2-VQ (vLLM) & RTX 4090 & $\sim$237ms & Marginal \\
+            RDT2-FM & RTX 4090 & $\sim$125ms & Yes \\
+            RDT2-UltraFast & RTX 4090 & $\sim$100ms & Yes \\
+            \bottomrule
+        \end{tabular}
+    \end{table}
+
+    \vspace(0.3cm)
+    \textbf{Real-time requirement:}
+    \begin{itemize}
+        \item Action chunk: 0.8s (24 frames @ 30Hz)
+        \item Need inference $<$ 0.8s for continuous control
+        \item Buffer time needed for safety margin
+    \end{itemize}
+\end{frame}
+
+%------------------------------------------------------------------------------
+\begin{frame}{Summary: Critical Points}
+    \begin{columns}[T]
+        \begin{column}{0.5\textwidth}
+            \textbf{Must Verify:}
+            \begin{itemize}
+                \item Image: $384 \times 768$, RGB
+                \item Tokens: $[0, 1023]$ range
+                \item Normalizer: correct file
+                \item Rotation: 6D format
+                \item Gripper: rescaled
+            \end{itemize}
+        \end{column}
+        \begin{column}{0.5\textwidth}
+            \textbf{Common Pitfalls:}
+            \begin{itemize}
+                \item BGR vs RGB
+                \item Wrong normalizer
+                \item Token conversion
+                \item Quaternion vs 6D
+                \item Coordinate frame
+            \end{itemize}
+        \end{column}
+    \end{columns}
+
+    \vspace(0.5cm)
+    \begin{alertblock}{Golden Rule}
+        When in doubt, \textbf{print shapes and ranges} at every step. Most bugs are dimension or scale mismatches.
+    \end{alertblock}
+\end{frame}
+
+%------------------------------------------------------------------------------
+\begin{frame}{Resources}
+    \textbf{Official Links:}
+
+    \vspace(0.3cm)
+    \begin{itemize}
+        \item \textbf{GitHub:} \url{https://github.com/thu-ml/RDT2}
+        \item \textbf{Project Page:} \url{https://rdt-robotics.github.io/rdt2/}
+        \item \textbf{HuggingFace:}
+              \begin{itemize}
+                  \item RDT2-VQ: \code{robotics-diffusion-transformer/RDT2-VQ}
+                  \item RDT2-FM: \code{robotics-diffusion-transformer/RDT2-FM}
+                  \item Tokenizer: \code{robotics-diffusion-transformer/RVQActionTokenizer}
+              \end{itemize}
+    \end{itemize}
+
+    \vspace(0.3cm)
+    \textbf{Key Documentation:}
+    \begin{itemize}
+        \item \code{README.md} - Setup and usage
+        \item \code{DEPLOYMENT\_TIPS.md} - Real robot tips
+        \item \code{configs/} - Configuration examples
+    \end{itemize}
+\end{frame}
+

@@ -1,0 +1,761 @@
+%==============================================================================
+% PART 7: INFERENCE PIPELINE
+%==============================================================================
+
+\section{Inference Pipeline}
+
+%------------------------------------------------------------------------------
+\begin{frame}{Inference Entry Points}
+    \textbf{Real Robot Deployment:}
+
+    \vspace{0.5cm}
+    \begin{table}
+        \centering
+        \renewcommand{\arraystretch}{1.3}
+        \begin{tabular}{lll}
+            \toprule
+            \textbf{Model} & \textbf{Entry Point} & \textbf{Characteristics} \\
+            \midrule
+            RDT2-VQ & \code{deploy/inference\_real\_vq.py} & 27 passes, discrete \\
+            RDT2-FM & \code{deploy/inference\_real\_fm.py} & 6 passes, continuous \\
+            \bottomrule
+        \end{tabular}
+    \end{table}
+
+    \vspace{0.5cm}
+    \textbf{Key Differences:}
+    \begin{itemize}
+        \item VQ: Full VLM forward, VQVAE decode
+        \item FM: KV cache extraction + RDT denoising
+    \end{itemize}
+\end{frame}
+
+%------------------------------------------------------------------------------
+\begin{frame}{inference\_real\_vq.py: Arguments}
+    \begin{lstlisting}[language=Python, basicstyle=\ttfamily\scriptsize]
+@click.command()
+@click.option("--input", required=True)          # Model path
+@click.option("--vae_path", required=True)       # VQVAE path
+@click.option("--data_config", required=True)    # Data config
+@click.option("--robot_config", required=True)   # Robot config
+@click.option("--steps_per_inference", default=24)
+@click.option("--max_duration", default=2000000)
+@click.option("--frequency", default=30)         # Control Hz
+@click.option("--instruction", default=None)
+@click.option("--binarize_gripper", default=False)
+@click.option("--interact", default=False)       # Interactive mode
+@click.option("--use_vllm", default=False)       # vLLM acceleration
+    \end{lstlisting}
+\end{frame}
+
+%------------------------------------------------------------------------------
+\begin{frame}{inference\_real\_fm.py: Arguments}
+    \begin{lstlisting}[language=Python, basicstyle=\ttfamily\scriptsize]
+@click.command()
+@click.option("--input", required=True)          # RDT checkpoint
+@click.option("--pretrained_vision_language_model_name_or_path",
+              required=True)                     # Frozen VLM
+@click.option("--normalizer_path", required=True)
+@click.option("--model_config", required=True)   # RDT config
+@click.option("--data_config", required=True)
+@click.option("--robot_config", required=True)
+@click.option("--steps_per_inference", default=24)
+@click.option("--frequency", default=30)
+@click.option("--instruction", default=None)
+    \end{lstlisting}
+\end{frame}
+
+%------------------------------------------------------------------------------
+\begin{frame}{Complete VQ Inference Pipeline}
+    \begin{center}
+    \begin{tikzpicture}[
+        box/.style={rectangle, draw, rounded corners, minimum width=1.6cm, minimum height=0.5cm, align=center, font=\tiny},
+        arrow/.style={->, thick},
+        scale=0.65, transform shape
+    ]
+        % Row 1: Hardware
+        \node[box, fill=blue!20] (cam) at (0,5) {Cameras\\$2 \times 1280^2$};
+        \node[box, fill=green!20] (inst) at (2.5,5) {Instruction};
+
+        % Row 2: Preprocess
+        \node[box, fill=gray!30] (resize) at (0,3.5) {Resize\\$384 \times 768$};
+        \node[box, fill=gray!30] (jpeg) at (2.5,3.5) {JPEG\\(optional)};
+
+        % Row 3: Model
+        \node[box, fill=qwenblue!30, minimum width=4cm] (qwen) at (1.25,2) {Qwen2.5-VL (27 forwards)};
+
+        % Row 4: Post-process
+        \node[box, fill=vqpurple!30] (tokens) at (0,0.5) {VLA Tokens\\$[27]$};
+        \node[box, fill=gray!30] (convert) at (2.5,0.5) {Convert\\$V-t-1$};
+        \node[box, fill=yellow!30] (vae) at (5,0.5) {VQVAE\\Decode};
+
+        % Row 5: Action
+        \node[box, fill=gray!30] (unnorm) at (7.5,0.5) {Unnormalize};
+        \node[box, fill=actionorange!30] (action) at (10,0.5) {Action\\$[24,20]$};
+
+        % Row 6: Robot
+        \node[box, fill=gray!30] (grip) at (10,2) {Gripper\\Rescale};
+        \node[box, fill=rdtgreen!30] (robot) at (10,3.5) {Robot\\Controller};
+
+        % Arrows
+        \draw[arrow] (cam) -- (resize);
+        \draw[arrow] (resize) -- (jpeg);
+        \draw[arrow] (jpeg) -- (qwen);
+        \draw[arrow] (inst) -- (qwen);
+        \draw[arrow] (qwen) -- (tokens);
+        \draw[arrow] (tokens) -- (convert);
+        \draw[arrow] (convert) -- (vae);
+        \draw[arrow] (vae) -- (unnorm);
+        \draw[arrow] (unnorm) -- (action);
+        \draw[arrow] (action) -- (grip);
+        \draw[arrow] (grip) -- (robot);
+    \end{tikzpicture}
+    \end{center}
+\end{frame}
+
+%------------------------------------------------------------------------------
+\begin{frame}{Complete FM Inference Pipeline}
+    \begin{center}
+    \begin{tikzpicture}[
+        box/.style={rectangle, draw, rounded corners, minimum width=1.6cm, minimum height=0.5cm, align=center, font=\tiny},
+        arrow/.style={->, thick},
+        scale=0.65, transform shape
+    ]
+        % Row 1: Hardware
+        \node[box, fill=blue!20] (cam) at (0,5) {Cameras};
+        \node[box, fill=green!20] (inst) at (2.5,5) {Instruction};
+        \node[box, fill=actionorange!30] (state) at (5,5) {Robot State};
+
+        % Row 2: VLM
+        \node[box, fill=qwenblue!30] (qwen) at (1.25,3.5) {Qwen2.5-VL\\(Frozen, 1 fwd)};
+        \node[box, fill=yellow!30] (kv) at (1.25,2) {KV Cache};
+
+        % Row 3: RDT
+        \node[box, fill=gray!30] (noise) at (5,3.5) {Noise\\$\mathcal{N}(0,I)$};
+        \node[box, fill=rdtgreen!30] (rdt) at (5,2) {RDT Expert\\(5 forwards)};
+
+        % Row 4: Output
+        \node[box, fill=gray!30] (unnorm) at (8,2) {Unnormalize};
+        \node[box, fill=actionorange!30] (action) at (11,2) {Action\\$[24,20]$};
+
+        % Row 5: Robot
+        \node[box, fill=gray!30] (grip) at (11,3.5) {Gripper\\Rescale};
+        \node[box, fill=rdtgreen!30] (robot) at (11,5) {Robot\\Controller};
+
+        % Arrows
+        \draw[arrow] (cam) -- (qwen);
+        \draw[arrow] (inst) -- (qwen);
+        \draw[arrow] (qwen) -- (kv);
+        \draw[arrow] (kv) -- (rdt);
+        \draw[arrow] (state) -- (rdt);
+        \draw[arrow] (noise) -- (rdt);
+        \draw[arrow] (rdt) -- (unnorm);
+        \draw[arrow] (unnorm) -- (action);
+        \draw[arrow] (action) -- (grip);
+        \draw[arrow] (grip) -- (robot);
+
+        % Frozen
+        \node[draw, dashed, blue, fit=(qwen), inner sep=1pt] {};
+    \end{tikzpicture}
+    \end{center}
+\end{frame}
+
+%------------------------------------------------------------------------------
+\begin{frame}{Model Loading (VQ)}
+    \begin{lstlisting}[language=Python, basicstyle=\ttfamily\small]
+# Load processor
+processor = AutoProcessor.from_pretrained(
+    "Qwen/Qwen2.5-VL-7B-Instruct")
+
+# Load model
+model = Qwen2_5_VLForConditionalGeneration \
+    .from_pretrained(
+        input_path,
+        torch_dtype=torch.bfloat16,
+        attn_implementation="flash_attention_2"
+    ).to("cuda").eval()
+
+# Load VQVAE (float32 for precision)
+vae = MultiVQVAE.from_pretrained(vae_path)
+vae = vae.to("cuda").float()
+
+# Load normalizer
+normalizer = LinearNormalizer.load(normalizer_path)
+    \end{lstlisting}
+\end{frame}
+
+%------------------------------------------------------------------------------
+\begin{frame}{Model Loading (FM)}
+    \begin{lstlisting}[language=Python, basicstyle=\ttfamily\small]
+from models.rdt_inferencer import RDTInferencer
+
+model = RDTInferencer(
+    config=yaml.safe_load(open(model_config)),
+    pretrained_path=input_path,
+    normalizer_path=normalizer_path,
+    pretrained_vision_language_model_name_or_path=
+        vlm_path,
+    device="cuda:0",
+    dtype=torch.bfloat16
+)
+
+# IMPORTANT: Reset before each episode
+model.reset()
+    \end{lstlisting}
+
+    \vspace{0.3cm}
+    \begin{alertblock}{Note}
+        \code{model.reset()} must be called before each task episode to clear caches and compile the model
+    \end{alertblock}
+\end{frame}
+
+%------------------------------------------------------------------------------
+\begin{frame}{batch\_predict\_action Function}
+    \textbf{File:} \code{utils.py}
+
+    \vspace{0.3cm}
+    \begin{lstlisting}[language=Python, basicstyle=\ttfamily\scriptsize]
+def batch_predict_action(model, processor, vae, normalizer,
+                         examples, valid_action_id_length,
+                         instruction=None, apply_jpeg=False):
+    # 1. Preprocess images
+    images = [preprocess_data_from_umi(ex) for ex in examples]
+
+    # 2. Build chat template
+    text = processor.apply_chat_template(messages)
+    text += "<|im_start|>assistant\n<|quad_start|>"
+
+    # 3. Generate tokens
+    output = model.generate(**inputs, max_new_tokens=29)
+
+    # 4. Extract action tokens
+    action_ids = extract_between_markers(output)
+
+    # 5. Convert VLA -> VAE tokens
+    vae_ids = vocab_size - (action_ids + 1)
+    vae_ids = vae_ids.clamp(0, vae.num_embeddings - 1)
+
+    # 6. Decode and unnormalize
+    actions = vae.decode(vae_ids)
+    actions = normalizer["action"].unnormalize(actions)
+    \end{lstlisting}
+\end{frame}
+
+%------------------------------------------------------------------------------
+\begin{frame}{RDTInferencer.step() Method}
+    \textbf{File:} \code{models/rdt\_inferencer.py}
+
+    \vspace{0.3cm}
+    \begin{lstlisting}[language=Python, basicstyle=\ttfamily\small]
+def step(self, observations, instruction):
+    # 1. Extract images
+    images = [observations['images'][name]
+              for name in self.camera_names]
+
+    # 2. Encode (with caching)
+    if instruction not in self.lang_embeds_cache:
+        kv_cache = self.encode_image_and_instruction(
+            images, instruction)
+        self.lang_embeds_cache[instruction] = kv_cache
+
+    # 3. Predict action (5 denoising steps)
+    action = self.policy.predict_action(
+        states=observations['state'],
+        img_cond=kv_cache)
+
+    # 4. Unnormalize
+    action = self.normalizer["action"].unnormalize(action)
+    return action.squeeze(0)  # [24, 20]
+    \end{lstlisting}
+\end{frame}
+
+%------------------------------------------------------------------------------
+\begin{frame}{Latency Constants}
+    \textbf{Critical timing parameters:}
+
+    \vspace{0.5cm}
+    \begin{table}
+        \centering
+        \renewcommand{\arraystretch}{1.4}
+        \begin{tabular}{lll}
+            \toprule
+            \textbf{Parameter} & \textbf{Value} & \textbf{Description} \\
+            \midrule
+            Camera obs latency & 70 ms & Image capture delay \\
+            Action execution latency & 10 ms & Command transmission \\
+            Frame latency & $\sim$16.7 ms & $1/60$ second \\
+            \midrule
+            VQ inference & $\sim$400 ms & 27 forward passes \\
+            FM inference & $\sim$125 ms & 6 forward passes \\
+            \bottomrule
+        \end{tabular}
+    \end{table}
+
+    \vspace{0.3cm}
+    \begin{lstlisting}[language=Python, basicstyle=\ttfamily\small]
+camera_obs_latency = 0.07      # 70ms
+action_execution_latency = 0.01 # 10ms
+frame_latency = 1/60           # ~16.7ms
+    \end{lstlisting}
+\end{frame}
+
+%------------------------------------------------------------------------------
+\begin{frame}{Latency Compensation}
+    \begin{block}{Problem}
+        By the time action executes, observation is outdated
+    \end{block}
+
+    \vspace{0.3cm}
+    \textbf{Compensation Strategy:}
+    \begin{enumerate}
+        \item Measure inference time
+        \item Calculate total latency: $L = L_{\text{obs}} + L_{\text{inf}} + L_{\text{exec}}$
+        \item Skip initial actions that would be outdated
+        \item Start execution from appropriate action index
+    \end{enumerate}
+
+    \vspace{0.3cm}
+    \begin{lstlisting}[language=Python, basicstyle=\ttfamily\small]
+# Calculate actions to skip
+total_latency = camera_obs_latency + inference_time
+skip_frames = int(total_latency * frequency)
+
+# Execute remaining actions
+actions_to_execute = actions[skip_frames:]
+env.exec_actions(actions_to_execute,
+                 compensate_latency=True)
+    \end{lstlisting}
+\end{frame}
+
+%------------------------------------------------------------------------------
+\begin{frame}{Gripper Rescaling}
+    \begin{block}{UMI vs Real Robot}
+        UMI gripper range differs from real robot gripper range
+    \end{block}
+
+    \vspace{0.5cm}
+    \textbf{Rescaling Formula:}
+    \[
+        \boxed{g_{\text{robot}} = \frac{g_{\text{model}}}{0.088} \times 0.10}
+    \]
+
+    \vspace{0.3cm}
+    \begin{itemize}
+        \item UMI gripper range: $[0, 0.088]$ meters
+        \item Real robot range: $[0, 0.10]$ meters
+    \end{itemize}
+
+    \vspace{0.3cm}
+    \begin{lstlisting}[language=Python, basicstyle=\ttfamily\small]
+# Rescale gripper for right arm (index 9)
+action[:, 9] = action[:, 9] / 0.088 * 0.10
+
+# Rescale gripper for left arm (index 19)
+action[:, 19] = action[:, 19] / 0.088 * 0.10
+    \end{lstlisting}
+\end{frame}
+
+%------------------------------------------------------------------------------
+\begin{frame}{Binarize Gripper Option}
+    \begin{block}{Purpose}
+        Convert continuous gripper to binary open/close
+    \end{block}
+
+    \vspace{0.3cm}
+    \textbf{Implementation:}
+    \begin{lstlisting}[language=Python, basicstyle=\ttfamily\small]
+if binarize_gripper:
+    threshold = 0.5  # midpoint
+    gripper = action[..., grip_idx]
+    gripper = (gripper > threshold).float()
+    action[..., grip_idx] = gripper
+    \end{lstlisting}
+
+    \vspace{0.5cm}
+    \textbf{When to Use:}
+    \begin{itemize}
+        \item Robot gripper only supports open/close
+        \item Task doesn't require precise grip width
+        \item Reduces noise in gripper commands
+    \end{itemize}
+\end{frame}
+
+%------------------------------------------------------------------------------
+\begin{frame}{Robot Controllers}
+    \textbf{Supported Robots:}
+
+    \vspace{0.5cm}
+    \begin{table}
+        \centering
+        \renewcommand{\arraystretch}{1.3}
+        \begin{tabular}{lll}
+            \toprule
+            \textbf{Robot} & \textbf{Controller File} & \textbf{Protocol} \\
+            \midrule
+            UR5e & \code{rtde\_interpolation\_controller.py} & RTDE \\
+            Franka FR3 & \code{franka\_interpolation\_controller.py} & zerorpc \\
+            \bottomrule
+        \end{tabular}
+    \end{table}
+
+    \vspace{0.5cm}
+    \textbf{Directory:} \code{deploy/umi/real\_world/}
+
+    \vspace{0.3cm}
+    \textbf{Common Interface:}
+    \begin{itemize}
+        \item \code{STOP} - Halt motion
+        \item \code{SERVOL} - Servo to target
+        \item \code{SCHEDULE\_WAYPOINT} - Schedule future waypoint
+    \end{itemize}
+\end{frame}
+
+%------------------------------------------------------------------------------
+\begin{frame}{UR5e Controller (RTDE)}
+    \textbf{File:} \code{rtde\_interpolation\_controller.py}
+
+    \vspace{0.3cm}
+    \begin{lstlisting}[language=Python, basicstyle=\ttfamily\small]
+controller = RTDEInterpolationController(
+    shm_manager=shm_manager,
+    robot_ip="192.168.x.x",
+    frequency=125,          # CB2=125, UR3e=500
+    lookahead_time=0.1,     # [0.03, 0.2]s
+    gain=300,               # [100, 2000]
+    max_pos_speed=0.25,     # m/s
+    max_rot_speed=0.16,     # rad/s
+    tcp_offset_pose=offset,
+    payload_mass=1.0,       # kg
+)
+    \end{lstlisting}
+
+    \vspace{0.3cm}
+    \textbf{RTDE Protocol:} Real-Time Data Exchange (125-500 Hz)
+\end{frame}
+
+%------------------------------------------------------------------------------
+\begin{frame}{Franka FR3 Controller}
+    \textbf{File:} \code{franka\_interpolation\_controller.py}
+
+    \vspace{0.3cm}
+    \begin{lstlisting}[language=Python, basicstyle=\ttfamily\small]
+# Low-level interface
+interface = FrankaInterface()
+interface.go_home()
+interface.get_ee_pose()
+interface.get_joint_positions()
+interface.start_cartesian_impedance(Kx, Kxd)
+interface.update_desired_ee_pose(pose)
+
+# High-level controller
+controller = FrankaInterpolationController(
+    robot_ip="localhost",
+    robot_port=4243,
+    frequency=1000,         # Torque control Hz
+    verbose=False,
+    receive_latency=latency
+)
+    \end{lstlisting}
+
+    \vspace{0.3cm}
+    \textbf{Communication:} zerorpc over TCP
+\end{frame}
+
+%------------------------------------------------------------------------------
+\begin{frame}{BimanualUmiEnv}
+    \textbf{File:} \code{deploy/umi/real\_world/bimanual\_umi\_env.py}
+
+    \vspace{0.3cm}
+    \begin{lstlisting}[language=Python, basicstyle=\ttfamily\small]
+env = BimanualUmiEnv(
+    output_dir=output_dir,
+    cameras_config=cameras_config,
+    robots_config=robots_config,
+    grippers_config=grippers_config,
+    frequency=20,                    # Control Hz
+    max_obs_buffer_size=60,
+    camera_obs_latency=0.125,
+    max_pos_speed=0.25,              # m/s
+    max_rot_speed=0.6,               # rad/s
+)
+    \end{lstlisting}
+
+    \vspace{0.3cm}
+    \textbf{Key Methods:}
+    \begin{itemize}
+        \item \code{get\_obs()} - Get current observation
+        \item \code{exec\_actions(actions, timestamps)} - Execute actions
+        \item \code{start\_episode()} / \code{end\_episode()}
+    \end{itemize}
+\end{frame}
+
+%------------------------------------------------------------------------------
+\begin{frame}{Observation Structure}
+    \textbf{Output of \code{env.get\_obs()}:}
+
+    \vspace{0.3cm}
+    \begin{lstlisting}[language=Python, basicstyle=\ttfamily\small]
+obs = {
+    'camera0_rgb': np.array([H, W, 3]),  # uint8
+    'camera1_rgb': np.array([H, W, 3]),  # uint8
+    'robot0_eef_pos': np.array([3]),     # xyz
+    'robot0_eef_rot_axis_angle': np.array([3]),
+    'robot0_gripper_width': float,
+    'robot1_eef_pos': np.array([3]),
+    'robot1_eef_rot_axis_angle': np.array([3]),
+    'robot1_gripper_width': float,
+    'timestamp': float
+}
+    \end{lstlisting}
+
+    \vspace{0.3cm}
+    \textbf{Image Resolution:}
+    \begin{itemize}
+        \item Raw: $1280 \times 1024$
+        \item After resize: $384 \times 384$
+    \end{itemize}
+\end{frame}
+
+%------------------------------------------------------------------------------
+\begin{frame}{Action Execution}
+    \begin{lstlisting}[language=Python, basicstyle=\ttfamily\small]
+def exec_actions(self, actions, timestamps,
+                 compensate_latency=True):
+    """
+    Execute action sequence on robots.
+
+    Args:
+        actions: [T, 20] action chunk
+        timestamps: [T] execution times
+        compensate_latency: skip outdated actions
+
+    Action dimensions per robot (10):
+        [0:3] - Position (x, y, z)
+        [3:9] - Rotation (6D representation)
+        [9]   - Gripper width
+    """
+    for robot_idx in range(self.num_robots):
+        robot_actions = actions[:, robot_idx*10:(robot_idx+1)*10]
+        self.robots[robot_idx].schedule_waypoints(
+            robot_actions, timestamps)
+    \end{lstlisting}
+\end{frame}
+
+%------------------------------------------------------------------------------
+\begin{frame}{Control Loop Structure}
+    \begin{lstlisting}[language=Python, basicstyle=\ttfamily\scriptsize]
+# Main inference loop
+while True:
+    # 1. Get observation
+    obs = env.get_obs()
+    t_obs = time.time()
+
+    # 2. Preprocess
+    data = preprocess_data_from_umi(obs, instruction)
+
+    # 3. Predict actions
+    t_start = time.time()
+    actions = model.step(data, instruction)  # [24, 20]
+    inference_time = time.time() - t_start
+
+    # 4. Gripper rescaling
+    actions[:, 9] = actions[:, 9] / 0.088 * 0.10
+    actions[:, 19] = actions[:, 19] / 0.088 * 0.10
+
+    # 5. Execute with latency compensation
+    timestamps = compute_action_timestamps(
+        t_obs, inference_time, frequency)
+    env.exec_actions(actions, timestamps,
+                     compensate_latency=True)
+    \end{lstlisting}
+\end{frame}
+
+%------------------------------------------------------------------------------
+\begin{frame}{Action Space Conversion}
+    \textbf{File:} \code{deploy/umi/real\_world/real\_inference\_util.py}
+
+    \vspace{0.3cm}
+    \textbf{Policy $\rightarrow$ Robot Conversion:}
+    \begin{lstlisting}[language=Python, basicstyle=\ttfamily\small]
+def get_real_umi_action(action, env_obs,
+                        action_pose_repr='abs'):
+    """
+    Convert 10-dim policy action to robot command.
+
+    Policy (10-dim per robot):
+        [0:3]  - Target EE position
+        [3:9]  - Target EE rotation (6D)
+        [9]    - Gripper width
+
+    Robot command (7-dim per robot):
+        [0:3]  - Position (delta or absolute)
+        [3:6]  - Rotation vector (3D)
+        [6]    - Gripper command
+    """
+    \end{lstlisting}
+\end{frame}
+
+%------------------------------------------------------------------------------
+\begin{frame}{TCP Space Conversion}
+    \textbf{Tracker $\rightarrow$ TCP Transformation:}
+
+    \vspace{0.3cm}
+    \begin{lstlisting}[language=Python, basicstyle=\ttfamily\small]
+def convert_policy_to_tcp_space(
+    action,
+    T_tracker_to_policy,  # (0, 0.078, -0.026705)
+    T_tracker_to_tcp,     # (0, 0.070261, 0.272602)
+    backward=False
+):
+    """
+    Transform between policy space and TCP space.
+
+    Formula:
+        T_composed = T_tracker_to_tcp^-1 @ T_tracker_to_policy
+        action_tcp = composed_T @ action @ composed_T^-1
+    """
+    \end{lstlisting}
+
+    \vspace{0.3cm}
+    \begin{alertblock}{Important}
+        This conversion is critical for accurate robot control. Incorrect TCP offset causes systematic errors.
+    \end{alertblock}
+\end{frame}
+
+%------------------------------------------------------------------------------
+\begin{frame}{Robot Configuration YAML}
+    \textbf{File:} \code{configs/robots/eval\_bimanual\_*.yaml}
+
+    \vspace{0.3cm}
+    \begin{lstlisting}[language=Python, basicstyle=\ttfamily\scriptsize]
+tx_left_right: [[4x4 transformation matrix]]
+tx_tracker_to_tcp: [[4x4 transformation matrix]]
+
+cameras:
+  - serial: "camera_serial"
+    fps: 30
+    input_res: [1280, 1024]
+    output_res: [384, 384]
+
+robots:
+  - robot_type: "franka"  # or "ur5e"
+    robot_ip: "192.168.x.x"
+    robot_port: 4242
+    tcp_offset: 0.21
+    sphere_center: [x, y, z]
+    sphere_radius: 0.15
+
+grippers:
+  - gripper_ip: "192.168.x.x"
+    gripper_port: 1000
+    \end{lstlisting}
+\end{frame}
+
+%------------------------------------------------------------------------------
+\begin{frame}{Calibration Overview}
+    \textbf{Files:} \code{deploy/calibration/}
+
+    \vspace{0.5cm}
+    \textbf{Calibration Steps:}
+    \begin{enumerate}
+        \item \textbf{calibrate\_franka.py} - Collect tracker-robot data
+              \begin{itemize}
+                  \item Execute sinusoidal motion
+                  \item Record tracker and robot poses
+              \end{itemize}
+
+        \item \textbf{compute\_calibration\_matrix.py} - Optimize transform
+              \begin{itemize}
+                  \item L-BFGS-B optimization
+                  \item Minimize position + rotation error
+              \end{itemize}
+    \end{enumerate}
+
+    \vspace{0.3cm}
+    \textbf{Output:}
+    \begin{itemize}
+        \item \code{tx\_tracker\_to\_tcp}: $4 \times 4$ transformation matrix
+        \item Position error: $< 5$mm typical
+        \item Rotation error: $< 2^\circ$ typical
+    \end{itemize}
+\end{frame}
+
+%------------------------------------------------------------------------------
+\begin{frame}{vLLM Inference (VQ Only)}
+    \begin{lstlisting}[language=Python, basicstyle=\ttfamily\small]
+from vllm import LLM, SamplingParams
+
+# Initialize vLLM
+llm = LLM(
+    model=model_path,
+    dtype=torch.bfloat16,
+    tensor_parallel_size=1,
+    enable_chunked_prefill=True,
+    gpu_memory_utilization=0.90,
+    max_model_len=2048,
+    limit_mm_per_prompt={"image": 1}
+)
+
+# Sampling parameters
+sampling_params = SamplingParams(
+    max_tokens=29,
+    temperature=0.0,  # Greedy
+    detokenize=False
+)
+
+# Generate
+outputs = llm.generate(prompts, sampling_params)
+    \end{lstlisting}
+\end{frame}
+
+%------------------------------------------------------------------------------
+\begin{frame}{Interactive Mode}
+    \textbf{Option:} \code{--interact}
+
+    \vspace(0.5cm)
+    \textbf{Features:}
+    \begin{itemize}
+        \item Change instruction during execution
+        \item Keyboard control for manual override
+        \item Real-time task switching
+    \end{itemize}
+
+    \vspace{0.3cm}
+    \begin{lstlisting}[language=Python, basicstyle=\ttfamily\small]
+if interact:
+    print("Enter new instruction (or 'q' to quit):")
+    user_input = input()
+    if user_input == 'q':
+        break
+    elif user_input:
+        instruction = user_input
+        model.reset()  # Clear caches for new instruction
+    \end{lstlisting}
+\end{frame}
+
+%------------------------------------------------------------------------------
+\begin{frame}{Inference Pipeline Summary}
+    \begin{table}
+        \centering
+        \renewcommand{\arraystretch}{1.3}
+        \begin{tabular}{lcc}
+            \toprule
+            \textbf{Aspect} & \textbf{VQ} & \textbf{FM} \\
+            \midrule
+            Entry point & \code{inference\_real\_vq.py} & \code{inference\_real\_fm.py} \\
+            Forward passes & 27 & 6 \\
+            Inference time & $\sim$400ms & $\sim$125ms \\
+            VQVAE required & Yes & No \\
+            Normalizer & Yes & Yes \\
+            vLLM support & Yes & No \\
+            \bottomrule
+        \end{tabular}
+    \end{table}
+
+    \vspace(0.5cm)
+    \begin{block}{Key Steps}
+        1. Load models $\rightarrow$ 2. Get observation $\rightarrow$ 3. Predict action \\
+        $\rightarrow$ 4. Rescale gripper $\rightarrow$ 5. Execute with latency compensation
+    \end{block}
+\end{frame}
+

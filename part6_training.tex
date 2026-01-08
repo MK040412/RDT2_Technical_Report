@@ -1,0 +1,708 @@
+%==============================================================================
+% PART 6: TRAINING PIPELINE
+%==============================================================================
+
+\section{Training Pipeline}
+
+%------------------------------------------------------------------------------
+\begin{frame}{Three-Stage Training}
+    \begin{center}
+    \begin{tikzpicture}[
+        stage/.style={rectangle, draw, rounded corners, minimum width=3cm, minimum height=1cm, align=center},
+        arrow/.style={->, thick, >=stealth}
+    ]
+        \node[stage, fill=vqpurple!30] (s1) at (0,0) {\textbf{Stage 1}\\VQ Training\\(Action Tokenizer)};
+        \node[stage, fill=rdtgreen!30] (s2) at (5,0) {\textbf{Stage 2}\\FM Training\\(Action Expert)};
+        \node[stage, fill=actionorange!30] (s3) at (10,0) {\textbf{Stage 3}\\Distillation\\(UltraFast)};
+
+        \draw[arrow] (s1) -- (s2);
+        \draw[arrow] (s2) -- (s3);
+
+        \node[below=0.3cm] at (s1) {\small RDT2-VQ};
+        \node[below=0.3cm] at (s2) {\small RDT2-FM};
+        \node[below=0.3cm] at (s3) {\small Coming Soon};
+    \end{tikzpicture}
+    \end{center}
+
+    \vspace{0.5cm}
+    \textbf{Stage 1:} Train VLA with VQVAE action tokenizer \\
+    \textbf{Stage 2:} Train RDT action expert with frozen VLM \\
+    \textbf{Stage 3:} Distill to single-step model (future)
+\end{frame}
+
+%------------------------------------------------------------------------------
+\begin{frame}{Training Entry Points}
+    \textbf{Key Files:}
+
+    \vspace{0.5cm}
+    \begin{table}
+        \centering
+        \renewcommand{\arraystretch}{1.3}
+        \begin{tabular}{lll}
+            \toprule
+            \textbf{Stage} & \textbf{Entry Point} & \textbf{Purpose} \\
+            \midrule
+            Stage 1 (VQ) & \code{main.py} & VLA fine-tuning \\
+            Stage 1 (VQ) & \code{train.py} & Core training loop \\
+            Stage 2 (FM) & \code{rdt/main.py} & RDT training entry \\
+            Stage 2 (FM) & \code{rdt/train.py} & RDT training loop \\
+            \bottomrule
+        \end{tabular}
+    \end{table}
+
+    \vspace{0.5cm}
+    \textbf{Training Scripts:}
+    \begin{itemize}
+        \item \code{scripts/finetune\_lora.sh} - LoRA ($\sim$32GB)
+        \item \code{scripts/finetune\_full\_param.sh} - Full ($\sim$80GB)
+        \item \code{scripts/finetune\_rdt.sh} - RDT only ($\sim$16GB)
+    \end{itemize}
+\end{frame}
+
+%------------------------------------------------------------------------------
+\begin{frame}{Stage 1: VLA Training Overview}
+    \begin{center}
+    \begin{tikzpicture}[
+        box/.style={rectangle, draw, rounded corners, minimum width=2cm, minimum height=0.7cm, align=center, font=\scriptsize},
+        arrow/.style={->, thick},
+        scale=0.75, transform shape
+    ]
+        % Data
+        \node[box, fill=blue!20] (data) at (0,3) {WebDataset\\TAR shards};
+
+        % Processing
+        \node[box, fill=gray!30] (load) at (0,1.5) {Data Loading\\+ Augmentation};
+        \node[box, fill=yellow!30] (vae) at (0,0) {VQVAE\\Encode};
+
+        % Model
+        \node[box, fill=qwenblue!30, minimum width=4cm] (qwen) at (5,1.5) {Qwen2.5-VL-7B\\(Full/LoRA/QLoRA)};
+
+        % Loss
+        \node[box, fill=red!30] (loss) at (5,0) {Cross-Entropy\\Loss};
+
+        % Trainer
+        \node[box, fill=rdtgreen!30] (trainer) at (10,1.5) {HuggingFace\\Trainer};
+
+        % Arrows
+        \draw[arrow] (data) -- (load);
+        \draw[arrow] (load) -- (vae);
+        \draw[arrow] (load) -- (qwen);
+        \draw[arrow] (vae) -- node[above, font=\tiny] {labels} (loss);
+        \draw[arrow] (qwen) -- node[left, font=\tiny] {logits} (loss);
+        \draw[arrow] (loss) -- (trainer);
+        \draw[arrow] (trainer) -- ++(0,1) -| (qwen);
+    \end{tikzpicture}
+    \end{center}
+\end{frame}
+
+%------------------------------------------------------------------------------
+\begin{frame}{main.py: Command-Line Arguments}
+    \textbf{Model Configuration:}
+    \begin{lstlisting}[language=Python, basicstyle=\ttfamily\scriptsize]
+--pretrained_model_name_or_path  # Base VLM
+--vae_name                        # VQVAE path
+--tokenizer_name                  # Tokenizer (optional)
+--output_dir                      # Checkpoint output
+    \end{lstlisting}
+
+    \vspace{0.3cm}
+    \textbf{Training Configuration:}
+    \begin{lstlisting}[language=Python, basicstyle=\ttfamily\scriptsize]
+--train_batch_size 4              # Per-device batch
+--num_train_epochs 100            # Total epochs
+--max_train_steps None            # Override epochs
+--learning_rate 5e-6              # LR
+--lr_scheduler "constant"         # Scheduler type
+--lr_warmup_steps 500             # Warmup steps
+    \end{lstlisting}
+
+    \vspace{0.3cm}
+    \textbf{LoRA Configuration:}
+    \begin{lstlisting}[language=Python, basicstyle=\ttfamily\scriptsize]
+--use_lora False                  # Enable LoRA
+--use_qlora False                 # Enable QLoRA
+--lora_r 8                        # LoRA rank
+--lora_alpha 8                    # LoRA alpha
+--lora_dropout 0.1                # Dropout
+    \end{lstlisting}
+\end{frame}
+
+%------------------------------------------------------------------------------
+\begin{frame}{train.py: Core Training Loop}
+    \textbf{1. Model Loading:}
+    \begin{lstlisting}[language=Python, basicstyle=\ttfamily\small]
+# Load Vision-Language Model
+model = Qwen2_5_VLForConditionalGeneration \
+    .from_pretrained(
+        args.pretrained_model_name_or_path,
+        torch_dtype=weight_dtype,
+        attn_implementation="flash_attention_2"
+    )
+
+# Load Action Tokenizer
+vae = MultiVQVAE.from_pretrained(args.vae_name)
+vae = vae.to("cuda").float()
+    \end{lstlisting}
+
+    \vspace{0.3cm}
+    \textbf{2. LoRA Setup (if enabled):}
+    \begin{lstlisting}[language=Python, basicstyle=\ttfamily\small]
+if args.use_lora:
+    model = get_peft_model(model, lora_config)
+    model.print_trainable_parameters()
+    \end{lstlisting}
+\end{frame}
+
+%------------------------------------------------------------------------------
+\begin{frame}{Collate Function}
+    \textbf{Prepare batch for training:}
+
+    \vspace{0.3cm}
+    \begin{lstlisting}[language=Python, basicstyle=\ttfamily\scriptsize]
+def collate_fn(examples):
+    # 1. Process images
+    images = [preprocess_image(ex["image"]) for ex in examples]
+
+    # 2. Encode actions to tokens
+    actions = torch.stack([ex["action"] for ex in examples])
+    action_tokens = vae.encode(actions)  # [B, 27]
+
+    # 3. Convert to VLA token IDs
+    vla_tokens = vocab_size - action_tokens - 1
+
+    # 4. Build chat template
+    messages = build_chat_messages(images, instructions)
+    inputs = processor(messages)
+
+    # 5. Insert action tokens into labels
+    labels = inputs["input_ids"].clone()
+    labels[~action_mask] = -100  # Ignore non-action
+
+    return {"input_ids": ..., "labels": labels, ...}
+    \end{lstlisting}
+\end{frame}
+
+%------------------------------------------------------------------------------
+\begin{frame}{Training Arguments}
+    \begin{lstlisting}[language=Python, basicstyle=\ttfamily\small]
+TrainingArguments(
+    output_dir=args.output_dir,
+    per_device_train_batch_size=args.train_batch_size,
+    per_device_eval_batch_size=args.eval_batch_size,
+    learning_rate=args.learning_rate,
+    max_steps=args.max_train_steps,
+    bf16=True,  # Mixed precision
+    deepspeed=args.deepspeed,  # DeepSpeed config
+    gradient_checkpointing=args.gradient_checkpointing,
+    gradient_accumulation_steps=
+        args.gradient_accumulation_steps,
+    save_steps=args.checkpointing_steps,
+    save_total_limit=args.checkpoints_total_limit,
+    logging_steps=10,
+    dataloader_num_workers=16,
+    dataloader_pin_memory=True,
+)
+    \end{lstlisting}
+\end{frame}
+
+%------------------------------------------------------------------------------
+\begin{frame}{DeepSpeed ZeRO-1 Configuration}
+    \textbf{File:} \code{scripts/zero1.json}
+
+    \vspace{0.3cm}
+    \begin{lstlisting}[language=Python, basicstyle=\ttfamily\small]
+{
+    "bf16": {"enabled": "auto"},
+    "train_micro_batch_size_per_gpu": "auto",
+    "train_batch_size": "auto",
+    "gradient_accumulation_steps": "auto",
+    "zero_optimization": {
+        "stage": 1,
+        "allgather_partitions": true,
+        "allgather_bucket_size": 5e8,
+        "overlap_comm": true,
+        "contiguous_gradients": true,
+        "reduce_bucket_size": 8e8
+    },
+    "gradient_clipping": "auto"
+}
+    \end{lstlisting}
+
+    \vspace{0.3cm}
+    \textbf{ZeRO Stage 1:} Optimizer state partitioning only
+\end{frame}
+
+%------------------------------------------------------------------------------
+\begin{frame}{VLATrainer: Custom Evaluation}
+    \textbf{File:} \code{vla\_trainer.py}
+
+    \vspace{0.3cm}
+    \begin{lstlisting}[language=Python, basicstyle=\ttfamily\small]
+class VLATrainer(Trainer):
+    def __init__(self,
+                 num_eval_datasets=2,
+                 num_eval_batches=4,
+                 **kwargs):
+        super().__init__(**kwargs)
+        self.num_eval_datasets = num_eval_datasets
+        self.num_eval_batches = num_eval_batches
+
+    def evaluation_loop(self, dataloader, ...):
+        # Custom metrics computation
+        # - valid_rate
+        # - mse_error (total, pos, rot, grip)
+        # - geodesic_error
+        ...
+    \end{lstlisting}
+
+    \vspace{0.3cm}
+    \textbf{Features:}
+    \begin{itemize}
+        \item Round-robin multi-dataset evaluation
+        \item Limited batch evaluation for speed
+        \item Custom action metrics
+    \end{itemize}
+\end{frame}
+
+%------------------------------------------------------------------------------
+\begin{frame}{Evaluation Metrics Computation}
+    \begin{lstlisting}[language=Python, basicstyle=\ttfamily\scriptsize]
+def compute_action_metrics(pred_action, gt_action):
+    # 1. Valid rate
+    valid_mask = (pred_tokens >= 0) & (pred_tokens < 1024)
+    valid_rate = valid_mask.float().mean()
+
+    # 2. MSE (total)
+    mse_error = F.mse_loss(pred_action, gt_action)
+
+    # 3. MSE (position) - indices [0:3, 10:13]
+    mse_pos = F.mse_loss(pred_action[..., pos_idx],
+                         gt_action[..., pos_idx])
+
+    # 4. Geodesic (rotation) - indices [3:9, 13:19]
+    R_pred = rot6d_to_matrix(pred_action[..., rot_idx])
+    R_gt = rot6d_to_matrix(gt_action[..., rot_idx])
+    geodesic = compute_geodesic_distance(R_pred, R_gt)
+
+    # 5. MSE (gripper) - indices [9, 19]
+    mse_grip = F.mse_loss(pred_action[..., grip_idx],
+                          gt_action[..., grip_idx])
+    \end{lstlisting}
+\end{frame}
+
+%------------------------------------------------------------------------------
+\begin{frame}{Stage 2: RDT Training Overview}
+    \begin{center}
+    \begin{tikzpicture}[
+        box/.style={rectangle, draw, rounded corners, minimum width=2cm, minimum height=0.7cm, align=center, font=\scriptsize},
+        arrow/.style={->, thick},
+        scale=0.75, transform shape
+    ]
+        % Data
+        \node[box, fill=blue!20] (data) at (0,3) {WebDataset\\TAR shards};
+        \node[box, fill=gray!30] (load) at (0,1.5) {Data Loading};
+
+        % VLM
+        \node[box, fill=qwenblue!30] (qwen) at (4,3) {Qwen2.5-VL\\(Frozen)};
+        \node[box, fill=yellow!30] (kv) at (4,1.5) {KV Cache};
+
+        % RDT
+        \node[box, fill=rdtgreen!30] (rdt) at (8,1.5) {RDT Expert\\(Trainable)};
+
+        % Loss
+        \node[box, fill=red!30] (loss) at (8,0) {Flow Matching\\Loss};
+
+        % Arrows
+        \draw[arrow] (data) -- (load);
+        \draw[arrow] (load) -- (qwen);
+        \draw[arrow] (qwen) -- (kv);
+        \draw[arrow] (kv) -- (rdt);
+        \draw[arrow] (load) -| node[above, font=\tiny, pos=0.3] {actions} (rdt);
+        \draw[arrow] (rdt) -- (loss);
+        \draw[arrow] (loss.east) -- ++(0.5,0) |- (rdt.east);
+
+        % Frozen indicator
+        \node[draw, dashed, blue, fit=(qwen), inner sep=2pt] {};
+    \end{tikzpicture}
+    \end{center}
+\end{frame}
+
+%------------------------------------------------------------------------------
+\begin{frame}{rdt/main.py: Arguments}
+    \textbf{Model Configuration:}
+    \begin{lstlisting}[language=Python, basicstyle=\ttfamily\scriptsize]
+--config_path "configs/rdt/post_train.yaml"
+--pretrained_vision_language_model_name_or_path
+--webdataset_config  # Dataset YAML
+    \end{lstlisting}
+
+    \vspace{0.3cm}
+    \textbf{Training Configuration:}
+    \begin{lstlisting}[language=Python, basicstyle=\ttfamily\scriptsize]
+--train_batch_size 256            # Large batches
+--sample_batch_size 4             # Validation batch
+--num_sample_batches 4            # Validation batches
+--max_train_steps 1000000         # 1M steps
+--learning_rate 1e-4
+--checkpointing_period 5000
+--sample_period 1000              # Validation frequency
+    \end{lstlisting}
+
+    \vspace{0.3cm}
+    \textbf{Augmentation:}
+    \begin{lstlisting}[language=Python, basicstyle=\ttfamily\scriptsize]
+--image_aug False                 # Image augmentation
+--cond_mask_prob 0.1              # Condition masking
+--cam_ext_mask_prob 0.2           # Camera masking
+--state_noise_snr 40              # State noise (dB)
+    \end{lstlisting}
+\end{frame}
+
+%------------------------------------------------------------------------------
+\begin{frame}{rdt/train.py: Training Loop}
+    \begin{lstlisting}[language=Python, basicstyle=\ttfamily\scriptsize]
+for step in range(args.max_train_steps):
+    batch = next(train_dataloader)
+
+    # 1. Normalize actions
+    naction = normalizer["action"].normalize(batch["actions"])
+
+    # 2. Extract VLM features (frozen)
+    with torch.no_grad():
+        vlang_kv_cache = extract_kv_cache(
+            vision_language_model, batch)
+
+    # 3. RDT forward (flow-matching loss)
+    loss = rdt_runner(
+        gt_action=naction,
+        states=batch["states"],
+        img_cond=vlang_kv_cache,
+        img_attn_mask=attn_mask
+    )
+
+    # 4. Backward + optimize
+    accelerator.backward(loss)
+    optimizer.step()
+    lr_scheduler.step()
+    optimizer.zero_grad()
+    \end{lstlisting}
+\end{frame}
+
+%------------------------------------------------------------------------------
+\begin{frame}{Dataset Configuration}
+    \textbf{File:} \code{configs/datasets/example.yaml}
+
+    \vspace{0.3cm}
+    \textbf{Single Dataset:}
+    \begin{lstlisting}[language=Python, basicstyle=\ttfamily\small]
+name: bimanual/ur_example
+type: single
+shards_dir: /path/to/shards
+kwargs:
+  instruction_path: /path/to/instruction.json
+  normalizer_path: /path/to/normalizer.pt
+    \end{lstlisting}
+
+    \vspace{0.3cm}
+    \textbf{Blended Dataset:}
+    \begin{lstlisting}[language=Python, basicstyle=\ttfamily\small]
+name: blended_dataset
+type: blended
+datasets:
+  - name: dataset1
+    weight: 0.5
+    config_path: configs/datasets/dataset1.yaml
+  - name: dataset2
+    weight: 0.5
+    config_path: configs/datasets/dataset2.yaml
+    \end{lstlisting}
+\end{frame}
+
+%------------------------------------------------------------------------------
+\begin{frame}{WebDataset Loading}
+    \textbf{File:} \code{rdt/dataset.py}
+
+    \vspace{0.3cm}
+    \begin{lstlisting}[language=Python, basicstyle=\ttfamily\small]
+def get_train_dataset(shards_dir):
+    # Load TAR shards
+    dataset = wds.WebDataset(shards_dir)
+    dataset = dataset.shuffle(1000)
+    dataset = dataset.decode("pil")
+
+    # Map to dictionary
+    dataset = dataset.map(lambda x: {
+        "image": x["image.jpg"],
+        "action": np.load(io.BytesIO(x["action.npy"])),
+        "meta": json.loads(x["meta.json"])
+    })
+
+    return dataset
+    \end{lstlisting}
+
+    \vspace{0.3cm}
+    \textbf{Multi-Dataset Blending:}
+    \begin{lstlisting}[language=Python, basicstyle=\ttfamily\small]
+dataset = wds.RandomMix(datasets, weights)
+    \end{lstlisting}
+\end{frame}
+
+%------------------------------------------------------------------------------
+\begin{frame}{Normalizer}
+    \textbf{File:} \code{models/normalizer/normalizer.py}
+
+    \vspace{0.3cm}
+    \textbf{Normalization Modes:}
+    \begin{itemize}
+        \item \code{"limits"}: Min-max $\rightarrow [-1, 1]$
+        \item \code{"gaussian"}: Standardization $\rightarrow \mu=0, \sigma=1$
+    \end{itemize}
+
+    \vspace{0.3cm}
+    \begin{lstlisting}[language=Python, basicstyle=\ttfamily\small]
+# Forward normalization
+x_norm = x * scale + offset
+
+# Inverse normalization
+x_orig = (x - offset) / scale
+
+# Field-specific access
+normalizer["action"].normalize(action)
+normalizer["action"].unnormalize(action)
+
+# Save/Load
+normalizer.save("normalizer.pt")
+normalizer = LinearNormalizer.load("normalizer.pt")
+    \end{lstlisting}
+\end{frame}
+
+%------------------------------------------------------------------------------
+\begin{frame}{Training Script: LoRA}
+    \textbf{File:} \code{scripts/finetune\_lora.sh}
+
+    \vspace{0.3cm}
+    \begin{lstlisting}[language=bash, basicstyle=\ttfamily\scriptsize]
+accelerate launch --config_file scripts/zero1.json main.py \
+    --pretrained_model_name_or_path \
+        robotics-diffusion-transformer/RDT2-VQ \
+    --vae_name \
+        robotics-diffusion-transformer/RVQActionTokenizer \
+    --dataset configs/datasets/your_dataset.yaml \
+    --output_dir outputs/lora_finetune \
+    --train_batch_size 96 \
+    --max_train_steps 10000 \
+    --learning_rate 1e-4 \
+    --lr_scheduler cosine \
+    --mixed_precision bf16 \
+    --use_lora \
+    --gradient_checkpointing \
+    --checkpointing_steps 1000 \
+    --dataloader_num_workers 16
+    \end{lstlisting}
+
+    \vspace{0.3cm}
+    \textbf{VRAM:} $\sim$32 GB
+\end{frame}
+
+%------------------------------------------------------------------------------
+\begin{frame}{Training Script: Full Parameter}
+    \textbf{File:} \code{scripts/finetune\_full\_param.sh}
+
+    \vspace{0.3cm}
+    \begin{lstlisting}[language=bash, basicstyle=\ttfamily\scriptsize]
+accelerate launch --config_file scripts/zero1.json main.py \
+    --pretrained_model_name_or_path \
+        robotics-diffusion-transformer/RDT2-VQ \
+    --vae_name \
+        robotics-diffusion-transformer/RVQActionTokenizer \
+    --dataset configs/datasets/your_dataset.yaml \
+    --output_dir outputs/full_finetune \
+    --train_batch_size 64 \
+    --max_train_steps 10000 \
+    --learning_rate 1e-5 \
+    --lr_scheduler cosine \
+    --mixed_precision bf16 \
+    --gradient_checkpointing \
+    --checkpointing_steps 1000 \
+    --dataloader_num_workers 16
+    \end{lstlisting}
+
+    \vspace{0.3cm}
+    \textbf{VRAM:} $\sim$80 GB (A100 80GB / H100)
+\end{frame}
+
+%------------------------------------------------------------------------------
+\begin{frame}{Training Script: RDT Only}
+    \textbf{File:} \code{scripts/finetune\_rdt.sh}
+
+    \vspace{0.3cm}
+    \begin{lstlisting}[language=bash, basicstyle=\ttfamily\scriptsize]
+accelerate launch --config_file scripts/zero1.json \
+    rdt/main.py \
+    --pretrained_vision_language_model_name_or_path \
+        robotics-diffusion-transformer/RDT2-VQ \
+    --config_path configs/rdt/post_train.yaml \
+    --webdataset_config configs/datasets/your_dataset.yaml \
+    --output_dir outputs/rdt_finetune \
+    --train_batch_size 64 \
+    --sample_batch_size 32 \
+    --max_train_steps 1000000 \
+    --learning_rate 1e-4 \
+    --checkpointing_period 5000 \
+    --sample_period 1000 \
+    --image_aug
+    \end{lstlisting}
+
+    \vspace{0.3cm}
+    \textbf{VRAM:} $\sim$16 GB (RTX 4090)
+\end{frame}
+
+%------------------------------------------------------------------------------
+\begin{frame}{VRAM Requirements Summary}
+    \begin{table}
+        \centering
+        \renewcommand{\arraystretch}{1.4}
+        \begin{tabular}{lccc}
+            \toprule
+            \textbf{Training Mode} & \textbf{VRAM} & \textbf{GPU Example} & \textbf{Params} \\
+            \midrule
+            Full Fine-tune & $\geq$80 GB & A100 80GB / H100 & 7B \\
+            LoRA & $\geq$32 GB & A100 40GB & $\sim$20M \\
+            QLoRA & $\geq$20 GB & RTX 4090 & $\sim$20M \\
+            RDT Only & $\sim$16 GB & RTX 4090 & 400M \\
+            Inference & $\sim$16 GB & RTX 4090 & -- \\
+            \bottomrule
+        \end{tabular}
+    \end{table}
+
+    \vspace{0.5cm}
+    \begin{alertblock}{Recommendation}
+        For most use cases, \textbf{RDT-only training} ($\sim$16GB) provides good results with minimal hardware requirements
+    \end{alertblock}
+\end{frame}
+
+%------------------------------------------------------------------------------
+\begin{frame}{Training Tips}
+    \textbf{1. Learning Rate:}
+    \begin{itemize}
+        \item Full fine-tune: $1 \times 10^{-5}$
+        \item LoRA: $1 \times 10^{-4}$
+        \item RDT: $1 \times 10^{-4}$
+    \end{itemize}
+
+    \vspace{0.3cm}
+    \textbf{2. Batch Size:}
+    \begin{itemize}
+        \item Larger is better for RDT (256+ recommended)
+        \item Use gradient accumulation if limited VRAM
+    \end{itemize}
+
+    \vspace{0.3cm}
+    \textbf{3. Gradient Checkpointing:}
+    \begin{itemize}
+        \item Enable for large models (\code{--gradient\_checkpointing})
+        \item Trades compute for memory
+    \end{itemize}
+
+    \vspace{0.3cm}
+    \textbf{4. Mixed Precision:}
+    \begin{itemize}
+        \item Always use \code{bf16} on modern GPUs
+        \item Better numerical stability than \code{fp16}
+    \end{itemize}
+\end{frame}
+
+%------------------------------------------------------------------------------
+\begin{frame}{Checkpointing}
+    \textbf{Checkpoint Contents:}
+
+    \vspace{0.3cm}
+    \begin{itemize}
+        \item \code{model.safetensors} - Model weights
+        \item \code{optimizer.pt} - Optimizer state
+        \item \code{scheduler.pt} - LR scheduler state
+        \item \code{trainer\_state.json} - Training metadata
+        \item \code{config.json} - Model configuration
+    \end{itemize}
+
+    \vspace{0.5cm}
+    \textbf{Checkpoint Management:}
+    \begin{lstlisting}[language=Python, basicstyle=\ttfamily\small]
+--checkpointing_steps 1000      # Save every N steps
+--checkpoints_total_limit 20    # Keep last N checkpoints
+    \end{lstlisting}
+
+    \vspace{0.3cm}
+    \textbf{Resume Training:}
+    \begin{lstlisting}[language=Python, basicstyle=\ttfamily\small]
+--resume_from_checkpoint path/to/checkpoint
+    \end{lstlisting}
+\end{frame}
+
+%------------------------------------------------------------------------------
+\begin{frame}{Training Monitoring}
+    \textbf{Logged Metrics:}
+
+    \vspace{0.3cm}
+    \begin{table}
+        \centering
+        \renewcommand{\arraystretch}{1.2}
+        \begin{tabular}{ll}
+            \toprule
+            \textbf{Metric} & \textbf{Description} \\
+            \midrule
+            \code{train/loss} & Training loss \\
+            \code{train/learning\_rate} & Current LR \\
+            \code{eval/valid\_rate} & Valid token ratio \\
+            \code{eval/mse\_error} & Total MSE \\
+            \code{eval/mse\_error\_pos} & Position MSE \\
+            \code{eval/geodesic\_error\_rot} & Rotation error \\
+            \code{eval/mse\_error\_width} & Gripper MSE \\
+            \bottomrule
+        \end{tabular}
+    \end{table}
+
+    \vspace{0.3cm}
+    \textbf{Visualization:}
+    \begin{itemize}
+        \item TensorBoard: \code{tensorboard --logdir outputs/}
+        \item Weights \& Biases: \code{--report\_to wandb}
+    \end{itemize}
+\end{frame}
+
+%------------------------------------------------------------------------------
+\begin{frame}{Training Pipeline Summary}
+    \begin{columns}[T]
+        \begin{column}{0.5\textwidth}
+            \textbf{Stage 1 (VQ):}
+            \begin{itemize}
+                \item Entry: \code{main.py}
+                \item Model: Qwen2.5-VL
+                \item Loss: Cross-entropy
+                \item Output: Discrete tokens
+                \item Fine-tune: Full/LoRA/QLoRA
+            \end{itemize}
+        \end{column}
+        \begin{column}{0.5\textwidth}
+            \textbf{Stage 2 (FM):}
+            \begin{itemize}
+                \item Entry: \code{rdt/main.py}
+                \item Model: RDT Expert
+                \item Loss: Flow matching
+                \item Output: Continuous
+                \item VLM: Frozen
+            \end{itemize}
+        \end{column}
+    \end{columns}
+
+    \vspace{0.5cm}
+    \begin{block}{Key Files}
+        \begin{itemize}
+            \item \code{train.py}, \code{rdt/train.py} - Core training
+            \item \code{vla\_trainer.py} - Custom evaluation
+            \item \code{scripts/zero1.json} - DeepSpeed config
+            \item \code{configs/datasets/*.yaml} - Dataset configs
+        \end{itemize}
+    \end{block}
+\end{frame}
+

@@ -1,0 +1,531 @@
+%==============================================================================
+% PART 2: UMI HARDWARE, DATA FORMAT, ACTION REPRESENTATION
+%==============================================================================
+
+\section{UMI Hardware}
+
+%------------------------------------------------------------------------------
+\begin{frame}{UMI: Universal Manipulation Interface}
+    \textbf{Key Design Changes from Original UMI:}
+
+    \vspace{0.5cm}
+    \begin{table}
+        \centering
+        \renewcommand{\arraystretch}{1.3}
+        \begin{tabular}{lll}
+            \toprule
+            \textbf{Component} & \textbf{Original}       & \textbf{RDT2}                \\
+            \midrule
+            Material           & 3D Printed              & Nylon 66 + Glass Fiber       \\
+            Fabrication        & FDM Printing            & CNC Machining                \\
+            Tracking           & SLAM                    & HTC VIVE Tracker 3.0         \\
+            Tracking Type      & Visual                  & Infrared Positioning         \\
+            \bottomrule
+        \end{tabular}
+    \end{table}
+\end{frame}
+
+%------------------------------------------------------------------------------
+\begin{frame}{Why VIVE Tracker?}
+    \textbf{Problem with SLAM:}
+    \begin{itemize}
+        \item Unreliable in texture-less environments
+        \item Fails on reflective surfaces
+        \item Drift over time
+    \end{itemize}
+
+    \vspace{0.5cm}
+    \textbf{VIVE Tracker 3.0 Benefits:}
+    \begin{itemize}
+        \item Robust 6DoF pose estimation
+        \item Works in any lighting condition
+        \item Sub-millimeter accuracy
+        \item No drift
+    \end{itemize}
+\end{frame}
+
+%------------------------------------------------------------------------------
+\begin{frame}{UMI Device Components}
+    Each UMI device contains:
+
+    \vspace{0.5cm}
+    \begin{enumerate}
+        \item \textbf{Fisheye Camera}
+              \begin{itemize}
+                  \item Resolution: $384 \times 384$ RGB
+                  \item Wrist-mounted ego-centric view
+              \end{itemize}
+
+              \vspace{0.3cm}
+        \item \textbf{HTC VIVE Tracker 3.0}
+              \begin{itemize}
+                  \item Position: $(x, y, z)$ in meters
+                  \item Rotation: quaternion $(w, x, y, z)$
+              \end{itemize}
+
+              \vspace{0.3cm}
+        \item \textbf{Gripper}
+              \begin{itemize}
+                  \item Width range: $[0, 0.088]$ meters
+                  \item $0$ = closed, $0.088$ = fully open
+              \end{itemize}
+    \end{enumerate}
+\end{frame}
+
+%------------------------------------------------------------------------------
+\begin{frame}{Data Collection Statistics}
+    \begin{table}
+        \centering
+        \renewcommand{\arraystretch}{1.4}
+        \begin{tabular}{lr}
+            \toprule
+            \textbf{Metric}                   & \textbf{Value}         \\
+            \midrule
+            UMI Systems Manufactured          & $\sim$100              \\
+            Collection Environments           & 100+ homes/offices     \\
+            Total Video Hours                 & 10,000+                \\
+            Cost vs Teleoperation             & $\sim$1/10             \\
+            Speed vs Traditional              & 5$\times$ faster       \\
+            \bottomrule
+        \end{tabular}
+    \end{table}
+\end{frame}
+
+%------------------------------------------------------------------------------
+\begin{frame}{Excluded Tasks}
+    \textbf{Tasks NOT covered in UMI data:}
+
+    \vspace{0.5cm}
+    \begin{itemize}
+        \item Water contact tasks
+        \item Heat contact tasks
+        \item Five-finger dexterity
+        \item Large consumable tasks
+    \end{itemize}
+
+    \vspace{0.5cm}
+    \begin{block}{Implication}
+        Zero-shot performance on these tasks is not guaranteed
+    \end{block}
+\end{frame}
+
+%==============================================================================
+\section{Data Format}
+
+%------------------------------------------------------------------------------
+\begin{frame}{WebDataset TAR Format}
+    Training data stored in \textbf{WebDataset} format (TAR files):
+
+    \vspace{0.5cm}
+    \texttt{shard-XXXXXX.tar} contains:
+
+    \vspace{0.3cm}
+    \begin{table}
+        \centering
+        \renewcommand{\arraystretch}{1.3}
+        \begin{tabular}{lll}
+            \toprule
+            \textbf{File}             & \textbf{Content}      & \textbf{Shape}         \\
+            \midrule
+            \texttt{N.image.jpg}      & Binocular RGB         & $(H, W, 3)$            \\
+            \texttt{N.action.npy}     & Relative actions      & $(24, 20)$             \\
+            \texttt{N.action\_token.npy} & VQ tokens          & $(27,)$                \\
+            \texttt{N.meta.json}      & Metadata              & JSON                   \\
+            \bottomrule
+        \end{tabular}
+    \end{table}
+\end{frame}
+
+%------------------------------------------------------------------------------
+\begin{frame}{Image Data Format}
+    \textbf{Binocular Image:}
+
+    \vspace{0.3cm}
+    \begin{itemize}
+        \item Left camera: $384 \times 384 \times 3$
+        \item Right camera: $384 \times 384 \times 3$
+        \item Concatenated horizontally: $384 \times 768 \times 3$
+    \end{itemize}
+
+    \vspace{0.5cm}
+    \textbf{Format Details:}
+    \begin{itemize}
+        \item Data type: \texttt{np.uint8}
+        \item Color space: RGB
+        \item Compression: JPEG
+        \item Value range: $[0, 255]$
+    \end{itemize}
+\end{frame}
+
+%------------------------------------------------------------------------------
+\begin{frame}{Image Concatenation}
+    \begin{tikzpicture}
+        % Left camera
+        \node[draw, fill=blue!20, minimum width=2cm, minimum height=2cm] (left) at (0, 0) {Left};
+        \node[below=0.2cm of left] {\small $384 \times 384$};
+
+        % Right camera
+        \node[draw, fill=green!20, minimum width=2cm, minimum height=2cm] (right) at (3, 0) {Right};
+        \node[below=0.2cm of right] {\small $384 \times 384$};
+
+        % Arrow
+        \draw[->, thick] (4.5, 0) -- (6, 0);
+
+        % Combined
+        \node[draw, fill=blue!20, minimum width=2cm, minimum height=2cm] (cleft) at (7.5, 0) {Left};
+        \node[draw, fill=green!20, minimum width=2cm, minimum height=2cm] (cright) at (9.5, 0) {Right};
+        \node[below=0.2cm of cright, xshift=-1cm] {\small $384 \times 768$};
+
+        % Fit box
+        \node[draw, dashed, fit=(cleft)(cright), inner sep=2mm] {};
+    \end{tikzpicture}
+\end{frame}
+
+%------------------------------------------------------------------------------
+\begin{frame}{Action Data Format}
+    \textbf{Action Tensor:}
+    \begin{equation}
+        \tens{A} \in \mathbb{R}^{B \times T \times D}
+    \end{equation}
+
+    where:
+    \begin{itemize}
+        \item $B$ = Batch size
+        \item $T = 24$ (timesteps)
+        \item $D = 20$ (action dimensions for bimanual)
+    \end{itemize}
+
+    \vspace{0.5cm}
+    \textbf{Properties:}
+    \begin{itemize}
+        \item Data type: \texttt{float32}
+        \item Values: relative deltas between frames
+        \item Duration: 0.8 seconds @ 30 Hz
+    \end{itemize}
+\end{frame}
+
+%------------------------------------------------------------------------------
+\begin{frame}{Action Token Format}
+    \textbf{Token Tensor:}
+    \begin{equation}
+        \vect{t} \in \mathbb{Z}^{B \times 27}
+    \end{equation}
+
+    \vspace{0.3cm}
+    \textbf{Properties:}
+    \begin{itemize}
+        \item Data type: \texttt{int16}
+        \item Value range: $[0, 1023]$
+        \item Codebook size: 1024
+        \item Total tokens: 27 per action chunk
+    \end{itemize}
+
+    \vspace{0.5cm}
+    \textbf{Token Distribution:}
+    \begin{itemize}
+        \item Position: 18 tokens
+        \item Rotation: 9 tokens
+        \item Gripper: 3 tokens (actual: varies)
+    \end{itemize}
+\end{frame}
+
+%------------------------------------------------------------------------------
+\begin{frame}[fragile]{Metadata JSON}
+    \textbf{Contents of \texttt{N.meta.json}:}
+
+    \vspace{0.5cm}
+\begin{lstlisting}[basicstyle=\ttfamily\small]
+{
+    "sub_task_instruction_key": "/path/to/instruction"
+}
+\end{lstlisting}
+
+    \vspace{0.5cm}
+    \textbf{Purpose:}
+    \begin{itemize}
+        \item Links sample to instruction file
+        \item Contains task-specific metadata
+        \item Used for instruction lookup during training
+    \end{itemize}
+\end{frame}
+
+%==============================================================================
+\section{Action Representation}
+
+%------------------------------------------------------------------------------
+\begin{frame}{20-D Bimanual Action Structure}
+    \textbf{Total: 20 dimensions = 10 per arm $\times$ 2 arms}
+
+    \vspace{0.5cm}
+    \begin{equation}
+        \vect{a} = [\underbrace{a_0, \ldots, a_9}_{\text{Right arm}}, \underbrace{a_{10}, \ldots, a_{19}}_{\text{Left arm}}]
+    \end{equation}
+\end{frame}
+
+%------------------------------------------------------------------------------
+\begin{frame}{Action Index Mapping}
+    \begin{table}
+        \centering
+        \renewcommand{\arraystretch}{1.3}
+        \begin{tabular}{clcc}
+            \toprule
+            \textbf{Indices}            & \textbf{Description}     & \textbf{Dim} & \textbf{Arm}  \\
+            \midrule
+            $[0, 1, 2]$                 & Position $(x, y, z)$     & 3            & Right         \\
+            $[3, 4, 5, 6, 7, 8]$        & Rotation (6D)            & 6            & Right         \\
+            $[9]$                       & Gripper width            & 1            & Right         \\
+            \midrule
+            $[10, 11, 12]$              & Position $(x, y, z)$     & 3            & Left          \\
+            $[13, 14, 15, 16, 17, 18]$  & Rotation (6D)            & 6            & Left          \\
+            $[19]$                      & Gripper width            & 1            & Left          \\
+            \bottomrule
+        \end{tabular}
+    \end{table}
+\end{frame}
+
+%------------------------------------------------------------------------------
+\begin{frame}{Per-Arm Action Structure (10-D)}
+    \textbf{Each robot arm uses 10 dimensions:}
+
+    \vspace{0.5cm}
+    \begin{equation}
+        \vect{a}_{\text{arm}} = \begin{bmatrix}
+            \underbrace{p_x, p_y, p_z}_{\text{Position (3)}} &
+            \underbrace{r_1, r_2, r_3, r_4, r_5, r_6}_{\text{Rotation (6)}} &
+            \underbrace{g}_{\text{Gripper (1)}}
+        \end{bmatrix}
+    \end{equation}
+
+    \vspace{0.5cm}
+    \textbf{Units:}
+    \begin{itemize}
+        \item Position: meters (relative delta)
+        \item Rotation: 6D representation (unitless)
+        \item Gripper: meters ($[0, 0.088]$)
+    \end{itemize}
+\end{frame}
+
+%------------------------------------------------------------------------------
+\begin{frame}{Why 6D Rotation?}
+    \textbf{Problems with other representations:}
+
+    \vspace{0.3cm}
+    \begin{itemize}
+        \item \textbf{Euler angles:}
+              \begin{itemize}
+                  \item Gimbal lock at certain orientations
+                  \item Discontinuous
+              \end{itemize}
+
+        \item \textbf{Quaternions:}
+              \begin{itemize}
+                  \item Double cover: $q$ and $-q$ are same rotation
+                  \item Discontinuity at antipodal points
+              \end{itemize}
+
+        \item \textbf{Axis-angle:}
+              \begin{itemize}
+                  \item Discontinuity at $\theta = 0$
+              \end{itemize}
+    \end{itemize}
+\end{frame}
+
+%------------------------------------------------------------------------------
+\begin{frame}{6D Rotation: Advantages}
+    \textbf{Benefits of 6D representation (Zhou et al., 2019):}
+
+    \vspace{0.5cm}
+    \begin{itemize}
+        \item \textbf{Continuous:} No discontinuities
+        \item \textbf{No singularities:} Works for all rotations
+        \item \textbf{Learnable:} Easy for neural networks
+        \item \textbf{Geodesic loss:} Enables proper rotation loss
+    \end{itemize}
+
+    \vspace{0.5cm}
+    \begin{block}{Key Insight}
+        First two columns of rotation matrix are sufficient!
+    \end{block}
+\end{frame}
+
+%------------------------------------------------------------------------------
+\begin{frame}{6D to Rotation Matrix: Theory}
+    \textbf{Given 6D vector:}
+    \begin{equation}
+        \vect{r} = [a_1, a_2, a_3, a_4, a_5, a_6]^\top
+    \end{equation}
+
+    \textbf{Step 1: Extract vectors}
+    \begin{equation}
+        \vect{a}_1 = [a_1, a_2, a_3]^\top, \quad \vect{a}_2 = [a_4, a_5, a_6]^\top
+    \end{equation}
+\end{frame}
+
+%------------------------------------------------------------------------------
+\begin{frame}{6D to Rotation Matrix: Gram-Schmidt}
+    \textbf{Step 2: Orthonormalize (Gram-Schmidt)}
+
+    \vspace{0.3cm}
+    \begin{align}
+        \vect{b}_1 &= \frac{\vect{a}_1}{\|\vect{a}_1\|_2} \\[0.3cm]
+        \vect{b}_2 &= \frac{\vect{a}_2 - (\vect{b}_1^\top \vect{a}_2)\vect{b}_1}{\|\vect{a}_2 - (\vect{b}_1^\top \vect{a}_2)\vect{b}_1\|_2} \\[0.3cm]
+        \vect{b}_3 &= \vect{b}_1 \times \vect{b}_2
+    \end{align}
+
+    \textbf{Step 3: Construct matrix}
+    \begin{equation}
+        \mat{R} = [\vect{b}_1 \mid \vect{b}_2 \mid \vect{b}_3] \in SO(3)
+    \end{equation}
+\end{frame}
+
+%------------------------------------------------------------------------------
+\begin{frame}[fragile]{6D to Matrix: Code}
+\begin{lstlisting}
+def rot6d_to_mat(rot6d):
+    """Convert 6D rotation to 3x3 matrix.
+    Input: rot6d [..., 6]
+    Output: mat [..., 3, 3]
+    """
+    a1 = rot6d[..., :3]
+    a2 = rot6d[..., 3:]
+
+    # Normalize first vector
+    b1 = F.normalize(a1, dim=-1)
+
+    # Orthogonalize second vector
+    dot = (b1 * a2).sum(dim=-1, keepdim=True)
+    b2 = F.normalize(a2 - dot * b1, dim=-1)
+
+    # Cross product
+    b3 = torch.cross(b1, b2, dim=-1)
+
+    return torch.stack([b1, b2, b3], dim=-1)
+\end{lstlisting}
+\end{frame}
+
+%------------------------------------------------------------------------------
+\begin{frame}{Geodesic Distance for Rotations}
+    \textbf{Definition:} Angular distance on $SO(3)$ manifold
+
+    \vspace{0.5cm}
+    \begin{equation}
+        d_{\text{geo}}(\mat{R}_1, \mat{R}_2) = \arccos\left(\frac{\text{tr}(\mat{R}_1^\top \mat{R}_2) - 1}{2}\right)
+    \end{equation}
+
+    \vspace{0.5cm}
+    \textbf{Properties:}
+    \begin{itemize}
+        \item Range: $[0, \pi]$ radians
+        \item Metric on $SO(3)$
+        \item Measures rotation angle between matrices
+    \end{itemize}
+\end{frame}
+
+%------------------------------------------------------------------------------
+\begin{frame}{Geodesic Loss Function}
+    \textbf{For training rotation prediction:}
+
+    \vspace{0.5cm}
+    \begin{equation}
+        \mathcal{L}_{\text{geo}} = \frac{1}{n}\sum_{i=1}^{n} \arccos\left(\frac{\text{tr}(\mat{R}_{\text{pred},i}^\top \mat{R}_{\text{gt},i}) - 1}{2}\right)
+    \end{equation}
+
+    \vspace{0.5cm}
+    \textbf{Normalized version:}
+    \begin{equation}
+        \mathcal{L}_{\text{geo,norm}} = \frac{\mathcal{L}_{\text{geo}}}{\pi} \in [0, 1]
+    \end{equation}
+\end{frame}
+
+%------------------------------------------------------------------------------
+\begin{frame}[fragile]{Geodesic Loss: Code}
+\begin{lstlisting}
+def geodesic_loss(R_pred, R_gt, eps=1e-7):
+    """Compute geodesic loss.
+    Input: R_pred, R_gt [..., 3, 3]
+    Output: loss (scalar)
+    """
+    # R_err = R_pred^T @ R_gt
+    R_err = torch.matmul(
+        R_pred.transpose(-1, -2), R_gt
+    )
+
+    # trace = sum of diagonal
+    trace = R_err.diagonal(dim1=-2, dim2=-1).sum(-1)
+
+    # cos(theta) = (trace - 1) / 2
+    cos_theta = (trace - 1) / 2
+    cos_theta = torch.clamp(cos_theta, -1+eps, 1-eps)
+
+    # loss = arccos(cos_theta)
+    return torch.acos(cos_theta).mean()
+\end{lstlisting}
+\end{frame}
+
+%------------------------------------------------------------------------------
+\begin{frame}{Gripper Width Details}
+    \textbf{Range:} $g \in [0, 0.088]$ meters
+
+    \vspace{0.5cm}
+    \begin{itemize}
+        \item $g = 0$: Fully closed
+        \item $g = 0.088$: Fully open (UMI gripper max)
+    \end{itemize}
+
+    \vspace{0.5cm}
+    \begin{alertblock}{Critical: Rescaling Required}
+        For real robot deployment:
+        \begin{equation}
+            g_{\text{robot}} = \frac{g_{\text{model}}}{0.088} \times g_{\text{max,robot}}
+        \end{equation}
+        Example: If robot max is 0.10m:
+        \begin{equation}
+            g_{\text{robot}} = \frac{g_{\text{model}}}{0.088} \times 0.10
+        \end{equation}
+    \end{alertblock}
+\end{frame}
+
+%------------------------------------------------------------------------------
+\begin{frame}{Action Chunk: Temporal Structure}
+    \textbf{One action chunk = 24 frames @ 30 Hz}
+
+    \vspace{0.5cm}
+    \begin{equation}
+        \text{Duration} = \frac{24 \text{ frames}}{30 \text{ Hz}} = 0.8 \text{ seconds}
+    \end{equation}
+
+    \vspace{0.5cm}
+    \textbf{Tensor shape:}
+    \begin{equation}
+        \tens{A} \in \mathbb{R}^{24 \times 20}
+    \end{equation}
+
+    \vspace{0.3cm}
+    \begin{itemize}
+        \item Row $i$: action at timestep $i$ (20 dimensions)
+        \item Column $j$: dimension $j$ across all timesteps
+    \end{itemize}
+\end{frame}
+
+%------------------------------------------------------------------------------
+\begin{frame}{Control Frequency}
+    \textbf{Model outputs 24 actions per inference}
+
+    \vspace{0.5cm}
+    \textbf{Execution strategies:}
+    \begin{enumerate}
+        \item \textbf{Execute all 24:}
+              \begin{itemize}
+                  \item Run at 30 Hz
+                  \item New inference every 0.8s
+              \end{itemize}
+
+              \vspace{0.3cm}
+        \item \textbf{Action chunking:}
+              \begin{itemize}
+                  \item Execute only first $k$ actions
+                  \item Re-predict more frequently
+                  \item Better reactivity
+              \end{itemize}
+    \end{enumerate}
+\end{frame}
