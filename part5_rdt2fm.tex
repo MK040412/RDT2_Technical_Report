@@ -95,7 +95,7 @@
 \end{frame}
 
 %------------------------------------------------------------------------------
-\begin{frame}{Flow Matching: Overview}
+\begin{frame}{Flow Matching: Overview (1/2)}
     \begin{block}{Core Idea}
         Learn to transport samples from noise distribution to data distribution
     \end{block}
@@ -107,8 +107,10 @@
     \]
 
     where $\vect{v}_\theta$ is the learned velocity field
+\end{frame}
 
-    \vspace{0.5cm}
+%------------------------------------------------------------------------------
+\begin{frame}{Flow Matching: Overview (2/2)}
     \textbf{Interpolation Path (Linear):}
     \[
         \vect{x}_t = (1 - t) \cdot \vect{x}_0 + t \cdot \vect{x}_1
@@ -124,6 +126,70 @@
     \[
         \vect{v}^* = \vect{x}_1 - \vect{x}_0 = \vect{a}_{\text{gt}} - \boldsymbol{\epsilon}
     \]
+\end{frame}
+
+%------------------------------------------------------------------------------
+\begin{frame}{Flow Matching: Noise to Data Trajectory}
+    \begin{center}
+    \begin{tikzpicture}[scale=0.9, transform shape]
+        % Axes
+        \draw[->] (-4,0) -- (5,0) node[right, font=\small] {$x_1$};
+        \draw[->] (0,-3.5) -- (0,4) node[above, font=\small] {$x_2$};
+
+        % Noise distribution (t=0) - scattered points on left
+        \begin{scope}
+            \fill[blue!20, opacity=0.5] (-3,0) circle (1.5);
+            \node[blue!70, font=\scriptsize] at (-3,2) {$t=0$};
+            \node[blue!70, font=\scriptsize] at (-3,1.7) {(Noise)};
+
+            % Sample points from noise
+            \foreach \x/\y in {-3.5/0.5, -2.8/-0.3, -3.2/0.8, -2.5/0.2, -3.8/-0.5, -2.9/1.0, -3.3/-0.8} {
+                \fill[blue!60] (\x,\y) circle (2pt);
+            }
+        \end{scope}
+
+        % Data distribution (t=1) - clustered on right
+        \begin{scope}
+            \fill[rdtgreen!20, opacity=0.5] (3.5,0.5) circle (0.8);
+            \node[rdtgreen!70, font=\scriptsize] at (3.5,2) {$t=1$};
+            \node[rdtgreen!70, font=\scriptsize] at (3.5,1.7) {(Data)};
+
+            % Target data points
+            \foreach \x/\y in {3.3/0.3, 3.6/0.7, 3.4/0.5, 3.7/0.4, 3.5/0.8, 3.2/0.6, 3.8/0.5} {
+                \fill[rdtgreen!70] (\x,\y) circle (2pt);
+            }
+        \end{scope}
+
+        % Flow trajectories (curved arrows from noise to data)
+        \draw[->, thick, red!70, opacity=0.8] (-3.5,0.5)
+            .. controls (-1,1.5) and (1,1) .. (3.3,0.3);
+        \draw[->, thick, red!70, opacity=0.8] (-2.8,-0.3)
+            .. controls (-0.5,0.5) and (1.5,0.8) .. (3.6,0.7);
+        \draw[->, thick, red!70, opacity=0.8] (-3.2,0.8)
+            .. controls (-1,1.8) and (1,1.2) .. (3.4,0.5);
+        \draw[->, thick, red!70, opacity=0.8] (-2.5,0.2)
+            .. controls (0,0.8) and (2,0.6) .. (3.7,0.4);
+        \draw[->, thick, red!70, opacity=0.8] (-3.8,-0.5)
+            .. controls (-1,-0.2) and (1,0.3) .. (3.5,0.8);
+
+        % Time markers along one trajectory
+        \fill[vqpurple!70] (-3.5,0.5) circle (3pt);
+        \fill[vqpurple!70] (-1.5,1.3) circle (3pt);
+        \fill[vqpurple!70] (0.5,1.0) circle (3pt);
+        \fill[vqpurple!70] (2,0.7) circle (3pt);
+        \fill[vqpurple!70] (3.3,0.3) circle (3pt);
+
+        \node[vqpurple!70, font=\tiny] at (-1.5,1.7) {$t{=}0.25$};
+        \node[vqpurple!70, font=\tiny] at (0.5,1.4) {$t{=}0.5$};
+        \node[vqpurple!70, font=\tiny] at (2,1.1) {$t{=}0.75$};
+
+        % Legend / Equation
+        \node[draw, fill=white, font=\scriptsize, align=left] at (0,-2.8) {
+            $\mathbf{x}_t = (1-t)\cdot\boldsymbol{\epsilon} + t\cdot\mathbf{a}_{\text{gt}}$\\[2pt]
+            $\mathbf{v}^* = \mathbf{a}_{\text{gt}} - \boldsymbol{\epsilon}$
+        };
+    \end{tikzpicture}
+    \end{center}
 \end{frame}
 
 %------------------------------------------------------------------------------
@@ -148,7 +214,7 @@
 \end{frame}
 
 %------------------------------------------------------------------------------
-\begin{frame}{Timestep Sampling: Logistic Normal}
+\begin{frame}{Timestep Sampling: Logistic Normal (1/2)}
     \begin{block}{Why Not Uniform?}
         Different timesteps have different importance for learning
     \end{block}
@@ -160,8 +226,10 @@
     \]
 
     where $\sigma(x) = \frac{1}{1 + e^{-x}}$ (sigmoid)
+\end{frame}
 
-    \vspace{0.3cm}
+%------------------------------------------------------------------------------
+\begin{frame}{Timestep Sampling: Logistic Normal (2/2)}
     \textbf{Default Parameters:}
     \begin{itemize}
         \item $\mu = 0$ (center)
@@ -270,7 +338,7 @@
 \end{frame}
 
 %------------------------------------------------------------------------------
-\begin{frame}{Timestep Embedding}
+\begin{frame}{Timestep Embedding (1/2)}
     \textbf{Sinusoidal Frequency Encoding:}
 
     \vspace{0.3cm}
@@ -281,9 +349,17 @@
         \text{PE}(t, 2k+1) = \cos\left(\frac{t}{10000^{2k/d}}\right)
     \]
 
-    \vspace{0.3cm}
+    \vspace{0.5cm}
+    \textbf{Dimension Flow:}
+    \[
+        t \in [0, 1] \xrightarrow{\text{sinusoidal}} [256] \xrightarrow{\text{MLP}} [1024]
+    \]
+\end{frame}
+
+%------------------------------------------------------------------------------
+\begin{frame}[fragile]{Timestep Embedding (2/2)}
     \textbf{MLP Processing:}
-    \begin{lstlisting}[language=Python, basicstyle=\ttfamily\small]
+    \begin{lstlisting}[language=Python]
 class TimestepEmbedder(nn.Module):
     def __init__(self, hidden_size, freq_dim=256):
         self.mlp = nn.Sequential(
@@ -293,11 +369,10 @@ class TimestepEmbedder(nn.Module):
         )
     \end{lstlisting}
 
-    \vspace{0.3cm}
-    \textbf{Dimension Flow:}
-    \[
-        t \in [0, 1] \xrightarrow{\text{sinusoidal}} [256] \xrightarrow{\text{MLP}} [1024]
-    \]
+    \vspace{0.5cm}
+    \begin{block}{Purpose}
+        Inject timestep information into each RDT block via adaptive layer norm
+    \end{block}
 \end{frame}
 
 %------------------------------------------------------------------------------
@@ -336,11 +411,11 @@ class TimestepEmbedder(nn.Module):
 \end{frame}
 
 %------------------------------------------------------------------------------
-\begin{frame}{KV Cache Extraction}
+\begin{frame}[fragile]{KV Cache Extraction (1/2)}
     \textbf{Extract VLM hidden states for RDT conditioning}
 
     \vspace{0.3cm}
-    \begin{lstlisting}[language=Python, basicstyle=\ttfamily\small]
+    \begin{lstlisting}[language=Python]
 # Forward through frozen VLM
 with torch.no_grad():
     outputs = vision_language_model(
@@ -354,18 +429,29 @@ hidden_states = [
     outputs.hidden_states[i]
     for i in selected_layers
 ]
+    \end{lstlisting}
+\end{frame}
 
+%------------------------------------------------------------------------------
+\begin{frame}[fragile]{KV Cache Extraction (2/2)}
+    \textbf{Stack and create KV cache:}
+    \begin{lstlisting}[language=Python]
 # Stack and create KV cache
 kv_cache = torch.stack(hidden_states, dim=1)
 # Shape: [B, num_layers, seq_len, hidden_dim]
     \end{lstlisting}
 
-    \vspace{0.3cm}
+    \vspace{0.5cm}
     \textbf{VLM Hidden Dim:} 2176 (Qwen2.5-VL specific)
+
+    \vspace{0.3cm}
+    \begin{block}{Note}
+        All 14 layers are used for conditioning the RDT action expert
+    \end{block}
 \end{frame}
 
 %------------------------------------------------------------------------------
-\begin{frame}{Attention Mask}
+\begin{frame}[fragile]{Attention Mask}
     \textbf{Control which VLM tokens RDT attends to}
 
     \vspace{0.5cm}
@@ -389,7 +475,7 @@ kv_cache = torch.stack(hidden_states, dim=1)
 
     \vspace{0.5cm}
     \textbf{Implementation:}
-    \begin{lstlisting}[language=Python, basicstyle=\ttfamily\small]
+    \begin{lstlisting}[language=Python]
 # Attention mask from processor
 attn_mask = inputs["attention_mask"]  # [B, seq_len]
 
@@ -399,42 +485,33 @@ attn_mask = inputs["attention_mask"]  # [B, seq_len]
 \end{frame}
 
 %------------------------------------------------------------------------------
-\begin{frame}{RDT Forward Pass}
+\begin{frame}[fragile]{RDT Forward Pass}
     \textbf{Single denoising step:}
 
-    \vspace{0.3cm}
-    \begin{lstlisting}[language=Python, basicstyle=\ttfamily\small]
-def forward(self, gt_action, states, img_cond,
-            img_attn_mask, lang_cond=None):
-    # 1. Sample timesteps
+    \vspace{0.2cm}
+    \begin{lstlisting}[language=Python]
+def forward(self, gt_action, states, img_cond, ...):
     t = self.sample_timesteps(batch_size)
 
-    # 2. Create noisy actions
+    # Create noisy actions (flow matching)
     noise = torch.randn_like(gt_action)
     noisy_action = (1 - t) * noise + t * gt_action
 
-    # 3. Predict velocity
-    pred_velocity = self.model(
-        x=noisy_action,
-        t=t,
-        img_cond=img_cond,
-        img_mask=img_attn_mask,
-        states=states
-    )
+    # Predict velocity
+    pred_v = self.model(noisy_action, t, img_cond, ...)
 
-    # 4. Compute loss
-    target = gt_action - noise
-    loss = F.mse_loss(pred_velocity, target)
+    # Compute loss: target = gt - noise
+    loss = F.mse_loss(pred_v, gt_action - noise)
     return loss
     \end{lstlisting}
 \end{frame}
 
 %------------------------------------------------------------------------------
-\begin{frame}{RDT Inference}
+\begin{frame}[fragile]{RDT Inference (1/2)}
     \textbf{Generate action from noise:}
 
     \vspace{0.3cm}
-    \begin{lstlisting}[language=Python, basicstyle=\ttfamily\small]
+    \begin{lstlisting}[language=Python]
 def predict_action(self, states, img_cond,
                    img_attn_mask):
     B = states.shape[0]
@@ -446,7 +523,15 @@ def predict_action(self, states, img_cond,
     dt = 1.0 / self.num_inference_timesteps
     for i in range(self.num_inference_timesteps):
         t = torch.full((B,), i * dt)
+    \end{lstlisting}
+\end{frame}
 
+%------------------------------------------------------------------------------
+\begin{frame}[fragile]{RDT Inference (2/2)}
+    \textbf{Continue Euler integration:}
+
+    \vspace{0.3cm}
+    \begin{lstlisting}[language=Python]
         # Predict velocity
         v = self.model(action, t, img_cond,
                        img_attn_mask, states)
@@ -456,38 +541,52 @@ def predict_action(self, states, img_cond,
 
     return action  # [B, 24, 20]
     \end{lstlisting}
+
+    \vspace{0.5cm}
+    \begin{block}{Key Points}
+        \begin{itemize}
+            \item 5 denoising steps (default)
+            \item Simple Euler integration (no higher-order solver)
+            \item Output: normalized action $[B, 24, 20]$
+        \end{itemize}
+    \end{block}
 \end{frame}
 
 %------------------------------------------------------------------------------
 \begin{frame}{Complete FM Inference Pipeline}
     \begin{center}
     \begin{tikzpicture}[
-        box/.style={rectangle, draw, rounded corners, minimum width=1.8cm, minimum height=0.6cm, align=center, font=\scriptsize},
-        arrow/.style={->, thick},
-        scale=0.7, transform shape
+        box/.style={rectangle, draw, rounded corners, minimum width=2cm, minimum height=0.8cm, align=center, font=\small},
+        arrow/.style={->, thick, >=stealth},
+        scale=0.85, transform shape
     ]
-        % VLM path
-        \node[box, fill=blue!20] (img) at (0,3) {Images};
-        \node[box, fill=green!20] (inst) at (2.5,3) {Instruction};
-        \node[box, fill=qwenblue!30] (qwen) at (1.25,1.5) {Qwen2.5-VL\\(1 forward)};
-        \node[box, fill=yellow!30] (kv) at (1.25,0) {KV Cache};
+        % Row 1: Inputs (top)
+        \node[box, fill=blue!20] (img) at (0,2.5) {Images};
+        \node[box, fill=green!20] (inst) at (3,2.5) {Instruction};
+        \node[box, fill=gray!20] (noise) at (7,2.5) {Noise\\$\mathcal{N}(0,I)$};
+        \node[box, fill=actionorange!30] (state) at (10.5,2.5) {Robot State};
 
-        % RDT path
-        \node[box, fill=gray!30] (noise) at (6,3) {Noise\\$\mathcal{N}(0,I)$};
-        \node[box, fill=actionorange!30] (state) at (9,3) {State};
+        % Row 2: Processing (middle)
+        \node[box, fill=qwenblue!30] (qwen) at (1.5,0.5) {Qwen2.5-VL\\(1 forward)};
+        \node[box, fill=rdtgreen!30] (rdt) at (7,0.5) {RDT Expert\\(5 forwards)};
 
-        \node[box, fill=rdtgreen!30] (rdt) at (7.5,1.5) {RDT Expert\\(5 forwards)};
+        % Row 3: Intermediate (bottom-middle)
+        \node[box, fill=yellow!30] (kv) at (1.5,-1.5) {KV Cache};
+        \node[box, fill=vqpurple!30] (action) at (7,-1.5) {Normalized\\Action};
 
-        \node[box, fill=vqpurple!30] (action) at (7.5,0) {Normalized\\Action};
+        % Row 4: Output (bottom)
+        \node[box, fill=gray!20] (unnorm) at (10.5,-1.5) {Unnormalize};
+        \node[box, fill=actionorange!30] (final) at (13.5,-1.5) {Action\\$[24,20]$};
 
-        \node[box, fill=gray!30] (unnorm) at (11,0) {Unnormalize};
-        \node[box, fill=actionorange!30] (final) at (14,0) {Action\\$[24,20]$};
-
-        % Arrows
+        % Arrows - VLM path
         \draw[arrow] (img) -- (qwen);
         \draw[arrow] (inst) -- (qwen);
         \draw[arrow] (qwen) -- (kv);
-        \draw[arrow] (kv) -- (rdt);
+
+        % KV Cache to RDT - horizontal then up
+        \draw[arrow] (kv.east) -- ++(1.5,0) |- (rdt.west);
+
+        % Arrows - RDT path
         \draw[arrow] (noise) -- (rdt);
         \draw[arrow] (state) -- (rdt);
         \draw[arrow] (rdt) -- (action);
@@ -495,17 +594,12 @@ def predict_action(self, states, img_cond,
         \draw[arrow] (unnorm) -- (final);
 
         % Frozen indicator
-        \node[draw, dashed, blue, fit=(qwen), inner sep=2pt] {};
+        \node[draw, dashed, blue, thick, fit=(qwen), inner sep=3pt, label={[font=\tiny, blue]below:Frozen}] {};
+
+        % Trainable indicator
+        \node[draw, dashed, rdtgreen, thick, fit=(rdt), inner sep=3pt, label={[font=\tiny, rdtgreen]below:Trainable}] {};
     \end{tikzpicture}
     \end{center}
-
-    \vspace{0.3cm}
-    \textbf{Total Forward Passes:}
-    \begin{itemize}
-        \item Qwen2.5-VL: 1 (frozen, extract KV cache)
-        \item RDT Expert: 5 (denoising steps)
-        \item \textbf{Total: 6 forward passes}
-    \end{itemize}
 \end{frame}
 
 %------------------------------------------------------------------------------
@@ -538,35 +632,35 @@ def predict_action(self, states, img_cond,
 
 %------------------------------------------------------------------------------
 \begin{frame}{Training Configuration}
-    \textbf{RDT Expert Training:}
-
-    \vspace{0.3cm}
-    \begin{table}
-        \centering
-        \renewcommand{\arraystretch}{1.2}
-        \begin{tabular}{ll}
-            \toprule
-            \textbf{Parameter} & \textbf{Value} \\
-            \midrule
-            Batch size & 256 \\
-            Learning rate & $1 \times 10^{-4}$ \\
-            Scheduler & Constant \\
-            Max steps & 1,000,000 \\
-            Optimizer & AdamW \\
-            Weight decay & 0.01 \\
-            Gradient clip & 1.0 \\
-            Mixed precision & bf16 \\
-            \bottomrule
-        \end{tabular}
-    \end{table}
-
-    \vspace{0.3cm}
-    \textbf{Data Augmentation:}
-    \begin{itemize}
-        \item \code{image\_aug}: Color jitter, random crop
-        \item \code{cond\_mask\_prob}: 0.1 (drop conditioning)
-        \item \code{cam\_ext\_mask\_prob}: 0.2 (mask cameras)
-    \end{itemize}
+    \begin{columns}[T]
+        \begin{column}{0.5\textwidth}
+            \textbf{RDT Expert Training:}
+            \begin{table}
+                \centering
+                \footnotesize
+                \renewcommand{\arraystretch}{1.1}
+                \begin{tabular}{ll}
+                    \toprule
+                    \textbf{Param} & \textbf{Value} \\
+                    \midrule
+                    Batch size & 256 \\
+                    LR & $10^{-4}$ \\
+                    Max steps & 1M \\
+                    Optimizer & AdamW \\
+                    Precision & bf16 \\
+                    \bottomrule
+                \end{tabular}
+            \end{table}
+        \end{column}
+        \begin{column}{0.5\textwidth}
+            \textbf{Data Augmentation:}
+            \begin{itemize}
+                \item Color jitter, crop
+                \item \code{cond\_mask}: 0.1
+                \item \code{cam\_mask}: 0.2
+            \end{itemize}
+        \end{column}
+    \end{columns}
 \end{frame}
 
 %------------------------------------------------------------------------------
@@ -599,7 +693,7 @@ def predict_action(self, states, img_cond,
 \end{frame}
 
 %------------------------------------------------------------------------------
-\begin{frame}{State Noise Augmentation}
+\begin{frame}{State Noise Augmentation (1/2)}
     \textbf{Add noise to robot state during training}
 
     \vspace{0.5cm}
@@ -612,8 +706,10 @@ def predict_action(self, states, img_cond,
     \[
         \text{SNR (dB)} = 10 \log_{10}\left(\frac{\|\vect{s}\|^2}{\|\boldsymbol{\eta}\|^2}\right)
     \]
+\end{frame}
 
-    \vspace{0.3cm}
+%------------------------------------------------------------------------------
+\begin{frame}{State Noise Augmentation (2/2)}
     \textbf{Default:} \code{state\_noise\_snr} = 40 dB
 
     \vspace{0.3cm}
@@ -627,39 +723,34 @@ def predict_action(self, states, img_cond,
 \end{frame}
 
 %------------------------------------------------------------------------------
-\begin{frame}{HuggingFace Model}
-    \textbf{Model Location:}
+\begin{frame}[fragile]{HuggingFace Model}
+    \textbf{Model:} \code{robotics-diffusion-transformer/RDT2-FM}
 
     \vspace{0.3cm}
-    \code{robotics-diffusion-transformer/RDT2-FM}
-
-    \vspace{0.5cm}
     \textbf{Loading:}
-    \begin{lstlisting}[language=Python, basicstyle=\ttfamily\small]
+    \begin{lstlisting}[language=Python]
 from models.rdt_runner import RDTRunner
 
 rdt_runner = RDTRunner.from_pretrained(
     "robotics-diffusion-transformer/RDT2-FM",
-    config=model_config,
-    dtype=torch.bfloat16
+    config=model_config, dtype=torch.bfloat16
 )
 
 # Frozen VLM
-vlm = Qwen2_5_VLForConditionalGeneration \
-    .from_pretrained(
-        "robotics-diffusion-transformer/RDT2-VQ",
-        torch_dtype=torch.bfloat16
-    )
+vlm = Qwen2_5_VLForConditionalGeneration.from_pretrained(
+    "robotics-diffusion-transformer/RDT2-VQ",
+    torch_dtype=torch.bfloat16
+)
 vlm.requires_grad_(False)  # Freeze
     \end{lstlisting}
 \end{frame}
 
 %------------------------------------------------------------------------------
-\begin{frame}{RDTInferencer Wrapper}
+\begin{frame}[fragile]{RDTInferencer Wrapper (1/2)}
     \textbf{High-level inference interface:}
 
     \vspace{0.3cm}
-    \begin{lstlisting}[language=Python, basicstyle=\ttfamily\small]
+    \begin{lstlisting}[language=Python]
 from models.rdt_inferencer import RDTInferencer
 
 model = RDTInferencer(
@@ -671,7 +762,13 @@ model = RDTInferencer(
     device="cuda:0",
     dtype=torch.bfloat16
 )
+    \end{lstlisting}
+\end{frame}
 
+%------------------------------------------------------------------------------
+\begin{frame}[fragile]{RDTInferencer Wrapper (2/2)}
+    \textbf{Usage:}
+    \begin{lstlisting}[language=Python]
 # Reset before each episode
 model.reset()
 
@@ -679,71 +776,90 @@ model.reset()
 action = model.step(observations, instruction)
 # Returns: [24, 20] tensor
     \end{lstlisting}
-\end{frame}
-
-%------------------------------------------------------------------------------
-\begin{frame}{Language Embedding Cache}
-    \begin{block}{Optimization}
-        Cache VLM outputs for repeated instructions
-    \end{block}
-
-    \vspace{0.3cm}
-    \textbf{Implementation:}
-    \begin{lstlisting}[language=Python, basicstyle=\ttfamily\small]
-class RDTInferencer:
-    def __init__(self, ...):
-        self.lang_embeds_cache = {}  # Max 1024
-
-    def step(self, obs, instruction):
-        if instruction not in self.lang_embeds_cache:
-            # Compute and cache
-            kv_cache = self.encode(obs, instruction)
-            self.lang_embeds_cache[instruction] = kv_cache
-        else:
-            # Use cached
-            kv_cache = self.lang_embeds_cache[instruction]
-
-        return self.policy.predict_action(kv_cache, ...)
-    \end{lstlisting}
-
-    \vspace{0.3cm}
-    \textbf{Benefit:} Skip VLM forward for repeated instructions
-\end{frame}
-
-%------------------------------------------------------------------------------
-\begin{frame}{RDT2-FM Strengths \& Weaknesses}
-    \begin{columns}[T]
-        \begin{column}{0.5\textwidth}
-            \textbf{Strengths:}
-            \begin{itemize}
-                \item Only 6 forward passes
-                \item No discretization error
-                \item Low training VRAM ($\sim$16GB)
-                \item Continuous action output
-                \item Fast training (frozen VLM)
-            \end{itemize}
-        \end{column}
-        \begin{column}{0.5\textwidth}
-            \textbf{Weaknesses:}
-            \begin{itemize}
-                \item Frozen VLM (no adaptation)
-                \item Still needs 5 RDT passes
-                \item Requires normalizer
-                \item Separate models to manage
-                \item More complex pipeline
-            \end{itemize}
-        \end{column}
-    \end{columns}
 
     \vspace{0.5cm}
-    \begin{alertblock}{Latency Analysis}
-        1 VLM ($\sim$50ms) + 5 RDT ($\sim$15ms each) = $\sim$125ms \\
-        $\sim$3$\times$ faster than RDT2-VQ
+    \begin{alertblock}{Important}
+        \code{model.reset()} must be called before each new task episode
     \end{alertblock}
 \end{frame}
 
 %------------------------------------------------------------------------------
-\begin{frame}{RDT2-FM Summary}
+\begin{frame}[fragile]{Language Embedding Cache (1/2)}
+    \begin{block}{Optimization}
+        Cache VLM outputs for repeated instructions
+    \end{block}
+
+    \begin{lstlisting}[language=Python]
+class RDTInferencer:
+    def __init__(self, ...):
+        self.lang_embeds_cache = {}  # Max 1024
+    \end{lstlisting}
+\end{frame}
+
+%------------------------------------------------------------------------------
+\begin{frame}[fragile]{Language Embedding Cache (2/2)}
+    \begin{lstlisting}[language=Python]
+def step(self, obs, instruction):
+    if instruction not in self.lang_embeds_cache:
+        kv_cache = self.encode(obs, instruction)
+        self.lang_embeds_cache[instruction] = kv_cache
+    else:
+        kv_cache = self.lang_embeds_cache[instruction]
+    return self.policy.predict_action(kv_cache, ...)
+    \end{lstlisting}
+\end{frame}
+
+%------------------------------------------------------------------------------
+\begin{frame}{Language Embedding Cache: Benefits}
+    \begin{alertblock}{Key Benefits}
+        \begin{itemize}
+            \item Skip VLM forward for repeated instructions
+            \item Reduces latency for multi-step tasks
+            \item Bounded cache size (max 1024 entries)
+        \end{itemize}
+    \end{alertblock}
+\end{frame}
+
+%------------------------------------------------------------------------------
+\begin{frame}{RDT2-FM Strengths}
+    \textbf{Key Advantages:}
+    \begin{itemize}
+        \item Only 6 forward passes (vs 27+ for VQ)
+        \item No discretization error (continuous output)
+        \item Low VRAM requirement ($\sim$16GB)
+        \item Fast training (frozen VLM)
+    \end{itemize}
+\end{frame}
+
+%------------------------------------------------------------------------------
+\begin{frame}{RDT2-FM Weaknesses}
+    \textbf{Limitations:}
+    \begin{itemize}
+        \item Frozen VLM (no fine-tuning adaptation)
+        \item Still requires 5 RDT passes
+        \item Normalizer dependency for action scaling
+        \item Separate models to manage
+    \end{itemize}
+\end{frame}
+
+%------------------------------------------------------------------------------
+\begin{frame}{RDT2-FM: Latency \& Use Cases}
+    \begin{alertblock}{Latency Analysis}
+        1 VLM ($\sim$50ms) + 5 RDT ($\sim$15ms each) = $\sim$125ms \\
+        $\sim$3$\times$ faster than RDT2-VQ
+    \end{alertblock}
+
+    \vspace{0.3cm}
+    \begin{block}{When to Use RDT2-FM}
+        \begin{itemize}
+            \item Real-time control requirements
+            \item Limited GPU memory (16GB)
+        \end{itemize}
+    \end{block}
+\end{frame}
+
+%------------------------------------------------------------------------------
+\begin{frame}{RDT2-FM Summary (1/2)}
     \begin{table}
         \centering
         \renewcommand{\arraystretch}{1.3}
@@ -756,6 +872,20 @@ class RDTInferencer:
             Output type & Continuous \\
             Denoising steps & 5 \\
             Total forward passes & 6 \\
+            \bottomrule
+        \end{tabular}
+    \end{table}
+\end{frame}
+
+%------------------------------------------------------------------------------
+\begin{frame}{RDT2-FM Summary (2/2)}
+    \begin{table}
+        \centering
+        \renewcommand{\arraystretch}{1.3}
+        \begin{tabular}{ll}
+            \toprule
+            \textbf{Attribute} & \textbf{Value} \\
+            \midrule
             Action chunk & 24 frames (0.8s) \\
             Inference time & $\sim$125ms \\
             Training VRAM & $\sim$16 GB \\

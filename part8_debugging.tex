@@ -85,14 +85,14 @@
 \end{frame}
 
 %------------------------------------------------------------------------------
-\begin{frame}{Common Issue: Image Format}
+\begin{frame}[fragile]{Common Issue: Image Format (1/2)}
     \begin{block}{Symptom}
         Model outputs random/incorrect actions regardless of input
     \end{block}
 
     \vspace{0.3cm}
     \textbf{Correct Format:}
-    \begin{lstlisting}[language=Python, basicstyle=\ttfamily\small]
+    \begin{lstlisting}[language=Python]
 # Per camera: [384, 384, 3] RGB uint8
 left_img = cv2.resize(left_raw, (384, 384))
 left_img = cv2.cvtColor(left_img, cv2.COLOR_BGR2RGB)
@@ -104,25 +104,37 @@ right_img = cv2.cvtColor(right_img, cv2.COLOR_BGR2RGB)
 combined = np.concatenate([left_img, right_img], axis=1)
 # Result: [384, 768, 3]
     \end{lstlisting}
+\end{frame}
 
-    \vspace{0.3cm}
+%------------------------------------------------------------------------------
+\begin{frame}[fragile]{Common Issue: Image Format (2/2)}
     \textbf{Common Mistakes:}
     \begin{itemize}
         \item BGR instead of RGB (OpenCV default)
         \item Wrong resize order (width vs height)
         \item Vertical instead of horizontal concatenation
+        \item Float images instead of uint8
     \end{itemize}
+
+    \vspace{0.5cm}
+    \begin{alertblock}{Quick Check}
+        \begin{lstlisting}[language=Python,basicstyle=\ttfamily\tiny]
+print(f"Shape: {img.shape}")  # Should be [384, 768, 3]
+print(f"dtype: {img.dtype}")  # Should be uint8
+print(f"Range: [{img.min()}, {img.max()}]")  # [0, 255]
+        \end{lstlisting}
+    \end{alertblock}
 \end{frame}
 
 %------------------------------------------------------------------------------
-\begin{frame}{Common Issue: Normalizer Mismatch}
+\begin{frame}[fragile]{Common Issue: Normalizer Mismatch (1/2)}
     \begin{block}{Symptom}
         Actions are scaled incorrectly (too large/small)
     \end{block}
 
     \vspace{0.3cm}
     \textbf{Diagnosis:}
-    \begin{lstlisting}[language=Python, basicstyle=\ttfamily\small]
+    \begin{lstlisting}[language=Python]
 # Check normalizer statistics
 print("Action stats:")
 print(f"  Scale: {normalizer['action'].scale}")
@@ -135,24 +147,32 @@ print(f"Normalized range: [{norm_action.min()}, "
       f"{norm_action.max()}]")
 # Should be roughly [-1, 1] for "limits" mode
     \end{lstlisting}
+\end{frame}
 
-    \vspace(0.3cm)
+%------------------------------------------------------------------------------
+\begin{frame}{Common Issue: Normalizer Mismatch (2/2)}
     \textbf{Solution:}
     \begin{itemize}
         \item Use normalizer trained on same data distribution
         \item Create new normalizer from ManiSkill dataset
+        \item Verify normalizer mode matches training
     \end{itemize}
+
+    \vspace{0.5cm}
+    \begin{alertblock}{Verification}
+        After normalization, values should be in $[-1, 1]$ range for "limits" mode
+    \end{alertblock}
 \end{frame}
 
 %------------------------------------------------------------------------------
-\begin{frame}{Common Issue: Token Conversion}
+\begin{frame}[fragile]{Common Issue: Token Conversion}
     \begin{block}{Symptom}
         High invalid token rate, decoder errors
     \end{block}
 
-    \vspace(0.3cm)
+    \vspace{0.3cm}
     \textbf{Correct Conversion:}
-    \begin{lstlisting}[language=Python, basicstyle=\ttfamily\small]
+    \begin{lstlisting}[language=Python]
 vocab_size = 152064  # Qwen2.5-VL vocabulary
 
 # VLA token -> VAE token
@@ -171,14 +191,14 @@ print(f"Valid rate: {valid_rate:.2%}")
 \end{frame}
 
 %------------------------------------------------------------------------------
-\begin{frame}{Common Issue: Rotation Format}
+\begin{frame}[fragile]{Common Issue: Rotation Format (1/2)}
     \begin{block}{Symptom}
         Position correct but orientation wrong
     \end{block}
 
-    \vspace(0.3cm)
+    \vspace{0.3cm}
     \textbf{6D Rotation Verification:}
-    \begin{lstlisting}[language=Python, basicstyle=\ttfamily\small]
+    \begin{lstlisting}[language=Python]
 def rot6d_to_matrix(rot6d):
     """Convert 6D rotation to 3x3 matrix."""
     a1, a2 = rot6d[..., :3], rot6d[..., 3:6]
@@ -190,12 +210,27 @@ def rot6d_to_matrix(rot6d):
     b3 = torch.cross(b1, b2, dim=-1)
 
     return torch.stack([b1, b2, b3], dim=-2)
+    \end{lstlisting}
+\end{frame}
 
+%------------------------------------------------------------------------------
+\begin{frame}[fragile]{Common Issue: Rotation Format (2/2)}
+    \textbf{Verification Code:}
+    \begin{lstlisting}[language=Python]
 # Verify orthonormality
 R = rot6d_to_matrix(rot6d)
 I = R @ R.transpose(-1, -2)  # Should be identity
 det = torch.det(R)           # Should be 1
     \end{lstlisting}
+
+    \vspace{0.5cm}
+    \begin{alertblock}{Common Rotation Mistakes}
+        \begin{itemize}
+            \item Using quaternion instead of 6D representation
+            \item Wrong dimension ordering in 6D
+            \item Missing Gram-Schmidt orthonormalization
+        \end{itemize}
+    \end{alertblock}
 \end{frame}
 
 %------------------------------------------------------------------------------
@@ -204,10 +239,10 @@ det = torch.det(R)           # Should be 1
         Actions are mirrored, inverted, or offset
     \end{block}
 
-    \vspace(0.3cm)
+    \vspace{0.3cm}
     \textbf{Key Transformations to Check:}
 
-    \vspace(0.3cm)
+    \vspace{0.3cm}
     \begin{enumerate}
         \item \textbf{Camera-to-Robot Transform}
               \begin{itemize}
@@ -230,8 +265,8 @@ det = torch.det(R)           # Should be 1
 \end{frame}
 
 %------------------------------------------------------------------------------
-\begin{frame}{Debugging Tool: Action Visualization}
-    \begin{lstlisting}[language=Python, basicstyle=\ttfamily\small]
+\begin{frame}[fragile]{Debugging Tool: Action Visualization (1/2)}
+    \begin{lstlisting}[language=Python]
 def visualize_action_chunk(action):
     """Plot action trajectory for debugging."""
     import matplotlib.pyplot as plt
@@ -246,7 +281,12 @@ def visualize_action_chunk(action):
     # Rotation (right arm) - first 3 of 6D
     axes[1].plot(action[:, 3:6])
     axes[1].set_title("Right Arm Rotation (6D[:3])")
+    \end{lstlisting}
+\end{frame}
 
+%------------------------------------------------------------------------------
+\begin{frame}[fragile]{Debugging Tool: Action Visualization (2/2)}
+    \begin{lstlisting}[language=Python]
     # Gripper (right arm)
     axes[2].plot(action[:, 9])
     axes[2].set_title("Right Gripper")
@@ -255,34 +295,32 @@ def visualize_action_chunk(action):
     plt.tight_layout()
     plt.savefig("action_debug.png")
     \end{lstlisting}
+
+    \vspace{0.5cm}
+    \begin{block}{Usage Tip}
+        Compare visualized trajectories to expected motion for quick sanity check
+    \end{block}
 \end{frame}
 
 %------------------------------------------------------------------------------
-\begin{frame}{Debugging Tool: Step-by-Step Trace}
-    \begin{lstlisting}[language=Python, basicstyle=\ttfamily\scriptsize]
+\begin{frame}[fragile]{Debugging Tool: Step-by-Step Trace}
+    \begin{lstlisting}[language=Python]
 def debug_inference(model, vae, normalizer, obs, instruction):
     # 1. Image preprocessing
     img = preprocess_image(obs)
-    print(f"Image shape: {img.shape}, dtype: {img.dtype}")
-    print(f"Image range: [{img.min()}, {img.max()}]")
+    print(f"Image: {img.shape}, range [{img.min()}, {img.max()}]")
 
     # 2. Token generation
     tokens = model.generate(...)
-    print(f"Generated tokens: {tokens.shape}")
-    print(f"Token range: [{tokens.min()}, {tokens.max()}]")
+    print(f"Tokens: {tokens.shape}, range [{tokens.min()}, {tokens.max()}]")
 
-    # 3. Token conversion
+    # 3. Token conversion + validation
     vae_tokens = convert_to_vae(tokens)
     valid = (vae_tokens >= 0) & (vae_tokens < 1024)
     print(f"Valid tokens: {valid.sum()}/{len(valid)}")
 
-    # 4. VAE decode
-    action_norm = vae.decode(vae_tokens)
-    print(f"Normalized action range: "
-          f"[{action_norm.min():.3f}, {action_norm.max():.3f}]")
-
-    # 5. Unnormalize
-    action = normalizer["action"].unnormalize(action_norm)
+    # 4. Decode + unnormalize
+    action = normalizer["action"].unnormalize(vae.decode(vae_tokens))
     print(f"Action range: [{action.min():.3f}, {action.max():.3f}]")
     \end{lstlisting}
 \end{frame}
@@ -291,7 +329,7 @@ def debug_inference(model, vae, normalizer, obs, instruction):
 \begin{frame}{ManiSkill Adaptation: Camera Setup}
     \textbf{RDT2 expects wrist-mounted fisheye cameras:}
 
-    \vspace(0.3cm)
+    \vspace{0.3cm}
     \begin{table}
         \centering
         \renewcommand{\arraystretch}{1.3}
@@ -307,7 +345,7 @@ def debug_inference(model, vae, normalizer, obs, instruction):
         \end{tabular}
     \end{table}
 
-    \vspace(0.3cm)
+    \vspace{0.3cm}
     \textbf{Adaptation Options:}
     \begin{itemize}
         \item Mount cameras at wrist in ManiSkill
@@ -317,7 +355,7 @@ def debug_inference(model, vae, normalizer, obs, instruction):
 \end{frame}
 
 %------------------------------------------------------------------------------
-\begin{frame}{ManiSkill Adaptation: Action Space}
+\begin{frame}{ManiSkill Adaptation: Action Space (1/2)}
     \textbf{RDT2 action format:}
     \begin{itemize}
         \item 20-dim bimanual (10 per arm)
@@ -325,17 +363,19 @@ def debug_inference(model, vae, normalizer, obs, instruction):
         \item Relative actions (delta from current pose)
     \end{itemize}
 
-    \vspace(0.3cm)
+    \vspace{0.5cm}
     \textbf{ManiSkill action format:}
     \begin{itemize}
         \item Varies by environment
         \item Often joint space or delta EE
         \item May use quaternion rotation
     \end{itemize}
+\end{frame}
 
-    \vspace(0.3cm)
+%------------------------------------------------------------------------------
+\begin{frame}[fragile]{ManiSkill Adaptation: Action Space (2/2)}
     \textbf{Conversion Required:}
-    \begin{lstlisting}[language=Python, basicstyle=\ttfamily\small]
+    \begin{lstlisting}[language=Python]
 # RDT2 action -> ManiSkill action
 def convert_action(rdt2_action, env):
     pos = rdt2_action[..., :3]
@@ -345,22 +385,27 @@ def convert_action(rdt2_action, env):
     grip = rdt2_action[..., 9]
     # Convert to env-specific format
     \end{lstlisting}
+
+    \vspace{0.3cm}
+    \begin{alertblock}{Key Point}
+        Each ManiSkill environment may require different action conversion
+    \end{alertblock}
 \end{frame}
 
 %------------------------------------------------------------------------------
-\begin{frame}{ManiSkill Adaptation: Franka Setup}
+\begin{frame}[fragile]{ManiSkill Adaptation: Franka Setup}
     \textbf{Franka-specific considerations:}
 
-    \vspace(0.3cm)
+    \vspace{0.3cm}
     \begin{itemize}
         \item \textbf{7-DoF arm:} Nullspace redundancy
         \item \textbf{Torque control:} Different from position control
         \item \textbf{Gripper:} Parallel jaw, $[0, 0.04]$m range
     \end{itemize}
 
-    \vspace(0.3cm)
+    \vspace{0.3cm}
     \textbf{Key Configuration:}
-    \begin{lstlisting}[language=Python, basicstyle=\ttfamily\small]
+    \begin{lstlisting}[language=Python]
 # ManiSkill Franka setup
 robot = FrankaRobot()
 robot.set_control_mode("ee_delta_pose")
@@ -418,7 +463,7 @@ action[..., 19] *= scale     # Left gripper
         \end{tabular}
     \end{table}
 
-    \vspace(0.3cm)
+    \vspace{0.3cm}
     \textbf{Action Indices:}
     \begin{itemize}
         \item Right arm: [0:10] (pos [0:3], rot [3:9], grip [9])
@@ -444,7 +489,7 @@ action[..., 19] *= scale     # Left gripper
         \end{tabular}
     \end{table}
 
-    \vspace(0.3cm)
+    \vspace{0.3cm}
     \textbf{Conversion Formulas:}
     \begin{align*}
         t_{\text{vae}} &= V_{\text{vocab}} - (t_{\text{vla}} + 1) \\
@@ -490,7 +535,7 @@ action[..., 19] *= scale     # Left gripper
 \begin{frame}{Testing Procedure}
     \textbf{Step-by-step verification:}
 
-    \vspace(0.3cm)
+    \vspace{0.3cm}
     \begin{enumerate}
         \item \textbf{Sanity Check: Identity Action}
               \begin{itemize}
@@ -519,11 +564,11 @@ action[..., 19] *= scale     # Left gripper
 \end{frame}
 
 %------------------------------------------------------------------------------
-\begin{frame}{Creating Custom Normalizer}
+\begin{frame}[fragile]{Creating Custom Normalizer}
     \textbf{For ManiSkill data:}
 
-    \vspace(0.3cm)
-    \begin{lstlisting}[language=Python, basicstyle=\ttfamily\small]
+    \vspace{0.3cm}
+    \begin{lstlisting}[language=Python]
 from models.normalizer import LinearNormalizer
 
 # Collect action statistics from dataset
@@ -562,7 +607,7 @@ offset = -action_min * scale
         \end{tabular}
     \end{table}
 
-    \vspace(0.3cm)
+    \vspace{0.3cm}
     \textbf{Real-time requirement:}
     \begin{itemize}
         \item Action chunk: 0.8s (24 frames @ 30Hz)
@@ -596,7 +641,7 @@ offset = -action_min * scale
         \end{column}
     \end{columns}
 
-    \vspace(0.5cm)
+    \vspace{0.5cm}
     \begin{alertblock}{Golden Rule}
         When in doubt, \textbf{print shapes and ranges} at every step. Most bugs are dimension or scale mismatches.
     \end{alertblock}
@@ -606,7 +651,7 @@ offset = -action_min * scale
 \begin{frame}{Resources}
     \textbf{Official Links:}
 
-    \vspace(0.3cm)
+    \vspace{0.3cm}
     \begin{itemize}
         \item \textbf{GitHub:} \url{https://github.com/thu-ml/RDT2}
         \item \textbf{Project Page:} \url{https://rdt-robotics.github.io/rdt2/}
@@ -618,7 +663,7 @@ offset = -action_min * scale
               \end{itemize}
     \end{itemize}
 
-    \vspace(0.3cm)
+    \vspace{0.3cm}
     \textbf{Key Documentation:}
     \begin{itemize}
         \item \code{README.md} - Setup and usage

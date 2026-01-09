@@ -78,7 +78,7 @@
 \end{frame}
 
 %------------------------------------------------------------------------------
-\begin{frame}{VQ Loss Functions}
+\begin{frame}{VQ Loss Functions (1/2)}
     \textbf{Three loss components:}
 
     \vspace{0.5cm}
@@ -94,81 +94,93 @@
     \]
 
     \vspace{0.3cm}
+    where $\text{sg}[\cdot]$ = stop-gradient operator
+\end{frame}
+
+%------------------------------------------------------------------------------
+\begin{frame}{VQ Loss Functions (2/2)}
     \textbf{3. Total VQ Loss:}
     \[
         \boxed{\mathcal{L}_{\text{VQ}} = \beta \cdot \mathcal{L}_{\text{commit}} + \gamma \cdot \mathcal{L}_{\text{cb}}}
     \]
 
-    \vspace{0.3cm}
-    where $\text{sg}[\cdot]$ = stop-gradient operator
-
-    \vspace{0.3cm}
+    \vspace{0.5cm}
     \begin{block}{Default Values}
         $\beta = 0.25$ (commitment\_cost), $\gamma = 0$ (codebook\_cost)
     \end{block}
-\end{frame}
-
-%------------------------------------------------------------------------------
-\begin{frame}{Straight-Through Estimator}
-    \begin{block}{Problem}
-        Quantization is \textbf{non-differentiable} (argmin operation)
-    \end{block}
-
-    \vspace{0.5cm}
-    \textbf{Solution: Straight-Through Gradient}
 
     \vspace{0.3cm}
-    \textbf{Forward pass:}
-    \[
-        \vect{z}_q = \text{Quantize}(\vect{z}_e) = \vect{w}_{k^*}
-    \]
-
-    \vspace{0.3cm}
-    \textbf{Backward pass:}
-    \[
-        \frac{\partial \mathcal{L}}{\partial \vect{z}_e} = \frac{\partial \mathcal{L}}{\partial \vect{z}_q}
-    \]
-
-    \vspace{0.3cm}
-    \textbf{Implementation:}
-    \[
-        \boxed{\vect{z}_q = \vect{z}_e + \text{sg}[\vect{z}_q - \vect{z}_e]}
-    \]
-
-    \vspace{0.3cm}
-    \begin{alertblock}{Interpretation}
-        Forward: output is $\vect{z}_q$ (quantized) \\
-        Backward: gradient flows directly to $\vect{z}_e$ (copies gradient)
+    \begin{alertblock}{Note}
+        With EMA codebook updates, $\gamma = 0$ is typical since the codebook is updated directly via exponential moving average rather than gradient descent.
     \end{alertblock}
 \end{frame}
 
 %------------------------------------------------------------------------------
+\begin{frame}{Straight-Through Estimator}
+    \begin{columns}[T]
+        \begin{column}{0.5\textwidth}
+            \begin{block}{Problem}
+                Quantization is \textbf{non-differentiable}
+            \end{block}
+
+            \vspace{0.2cm}
+            \textbf{Forward pass:}
+            \[
+                \vect{z}_q = \text{Quantize}(\vect{z}_e) = \vect{w}_{k^*}
+            \]
+
+            \textbf{Backward pass:}
+            \[
+                \frac{\partial \mathcal{L}}{\partial \vect{z}_e} = \frac{\partial \mathcal{L}}{\partial \vect{z}_q}
+            \]
+        \end{column}
+        \begin{column}{0.5\textwidth}
+            \textbf{Implementation:}
+            \[
+                \boxed{\vect{z}_q = \vect{z}_e + \text{sg}[\vect{z}_q - \vect{z}_e]}
+            \]
+
+            \vspace{0.3cm}
+            \begin{alertblock}{Interpretation}
+                Forward: output is $\vect{z}_q$ \\
+                Backward: gradient $\to \vect{z}_e$
+            \end{alertblock}
+        \end{column}
+    \end{columns}
+\end{frame}
+
+%------------------------------------------------------------------------------
 \begin{frame}{EMA Codebook Update}
-    \begin{block}{Why EMA?}
-        More stable than gradient-based updates for codebook learning
-    \end{block}
+    \begin{columns}[T]
+        \begin{column}{0.55\textwidth}
+            \textbf{Track cluster statistics:}
+            \begin{itemize}
+                \item $N_i^{(t)}$: count for entry $i$
+                \item $\vect{m}_i^{(t)}$: sum of assigned vectors
+            \end{itemize}
 
-    \vspace{0.3cm}
-    \textbf{Track cluster statistics:}
-    \begin{itemize}
-        \item $N_i^{(t)}$: count of vectors assigned to codebook entry $i$
-        \item $\vect{m}_i^{(t)}$: sum of encoder outputs assigned to entry $i$
-    \end{itemize}
+            \vspace{0.2cm}
+            \textbf{EMA Update Rules:}
+            \begin{align*}
+                N_i^{(t)} &= \gamma N_i^{(t-1)} + (1 - \gamma) n_i \\
+                \vect{m}_i^{(t)} &= \gamma \vect{m}_i^{(t-1)} + (1 - \gamma) \textstyle\sum_j \vect{z}_e^{(j)}
+            \end{align*}
+        \end{column}
+        \begin{column}{0.45\textwidth}
+            \textbf{Codebook Update:}
+            \[
+                \boxed{\vect{w}_i = \frac{\vect{m}_i}{\tilde{N}_i}}
+            \]
 
-    \vspace{0.3cm}
-    \textbf{EMA Update Rules:}
-    \begin{align*}
-        N_i^{(t)} &= \gamma \cdot N_i^{(t-1)} + (1 - \gamma) \cdot n_i \\
-        \vect{m}_i^{(t)} &= \gamma \cdot \vect{m}_i^{(t-1)} + (1 - \gamma) \sum_{j: \text{idx}(j)=i} \vect{z}_e^{(j)}
-    \end{align*}
+            \textbf{Laplace smoothing:}
+            \[
+                \tilde{N}_i = \frac{N_i + \epsilon}{N + Z\epsilon} N
+            \]
 
-    \vspace{0.3cm}
-    \textbf{Codebook Update (with Laplace smoothing):}
-    \[
-        \boxed{\vect{w}_i = \frac{\vect{m}_i}{\tilde{N}_i}}, \quad \tilde{N}_i = \frac{(N_i + \epsilon)}{(N + Z \epsilon)} \cdot N
-    \]
-
-    Default: $\gamma = 0.99$, $\epsilon = 10^{-5}$
+            \vspace{0.2cm}
+            Default: $\gamma = 0.99$, $\epsilon = 10^{-5}$
+        \end{column}
+    \end{columns}
 \end{frame}
 
 %------------------------------------------------------------------------------
@@ -177,18 +189,19 @@
         Improve codebook utilization by separating dimensions
     \end{block}
 
-    \vspace{0.5cm}
+    \vspace{0.3cm}
     \textbf{Architecture:}
     \begin{center}
     \begin{tikzpicture}[
-        box/.style={rectangle, draw, minimum width=2cm, minimum height=0.8cm, align=center},
-        arrow/.style={->, thick}
+        box/.style={rectangle, draw, minimum width=1.5cm, minimum height=0.7cm, align=center, font=\small},
+        arrow/.style={->, thick},
+        scale=0.85, transform shape
     ]
-        \node[box, fill=encoderblue!30] (ze) at (0,0) {$\vect{z}_e$\\{\footnotesize (latent\_dim)}};
-        \node[box, fill=vqpurple!30] (proj_in) at (3,0) {in\_proj\\{\footnotesize Linear}};
-        \node[box, fill=codebookpink!30] (vq) at (6,0) {VQ\\{\footnotesize (emb\_dim)}};
-        \node[box, fill=vqpurple!30] (proj_out) at (9,0) {out\_proj\\{\footnotesize Linear}};
-        \node[box, fill=decodergreen!30] (zq) at (12,0) {$\vect{z}_q$\\{\footnotesize (latent\_dim)}};
+        \node[box, fill=encoderblue!30] (ze) at (0,0) {$\vect{z}_e$\\{\tiny latent}};
+        \node[box, fill=vqpurple!30] (proj_in) at (2.5,0) {in\_proj};
+        \node[box, fill=codebookpink!30] (vq) at (5,0) {VQ};
+        \node[box, fill=vqpurple!30] (proj_out) at (7.5,0) {out\_proj};
+        \node[box, fill=decodergreen!30] (zq) at (10,0) {$\vect{z}_q$\\{\tiny latent}};
 
         \draw[arrow] (ze) -- (proj_in);
         \draw[arrow] (proj_in) -- (vq);
@@ -197,20 +210,19 @@
     \end{tikzpicture}
     \end{center}
 
-    \vspace{0.5cm}
+    \vspace{0.3cm}
     \textbf{Dimension Flow:}
     \[
-        \underbrace{64}_{\text{latent}} \xrightarrow{\text{in\_proj}} \underbrace{256}_{\text{embedding}} \xrightarrow{\text{VQ}} \underbrace{256}_{\text{embedding}} \xrightarrow{\text{out\_proj}} \underbrace{64}_{\text{latent}}
+        64 \xrightarrow{\text{in\_proj}} 256 \xrightarrow{\text{VQ}} 256 \xrightarrow{\text{out\_proj}} 64
     \]
 
-    \vspace{0.3cm}
     \begin{alertblock}{Benefit}
-        Codebook lookup happens in lower-dimensional space, improving usage
+        Codebook lookup in lower-dimensional space improves usage
     \end{alertblock}
 \end{frame}
 
 %------------------------------------------------------------------------------
-\begin{frame}{Codebook Restart}
+\begin{frame}{Codebook Restart (1/2)}
     \begin{block}{Problem: Dead Entries}
         Some codebook entries are never selected $\rightarrow$ wasted capacity
     \end{block}
@@ -228,30 +240,39 @@
     \[
         \text{dead\_entries} = \{ i : \sum_{t=1}^{P} \text{hits}_{t,i} = 0 \}
     \]
+\end{frame}
 
-    \vspace{0.3cm}
+%------------------------------------------------------------------------------
+\begin{frame}{Codebook Restart (2/2)}
     \textbf{Restart Process:}
     \begin{enumerate}
         \item Gather encoder outputs from all GPUs
         \item Randomly select from current batch
         \item Re-initialize dead entries with selected vectors
     \end{enumerate}
+
+    \vspace{0.5cm}
+    \begin{alertblock}{Implementation Detail}
+        \begin{itemize}
+            \item Uses \code{dist.all\_gather} for multi-GPU synchronization
+            \item Random sampling ensures diversity
+            \item Effectively performs online k-means update
+        \end{itemize}
+    \end{alertblock}
 \end{frame}
 
 %------------------------------------------------------------------------------
 \begin{frame}{Residual VQ Algorithm}
-    \begin{block}{Key Idea}
-        Quantize residuals iteratively for better reconstruction
-    \end{block}
-
-    \vspace{0.3cm}
     \begin{columns}[T]
         \begin{column}{0.55\textwidth}
+            \begin{block}{Key Idea}
+                Quantize residuals iteratively
+            \end{block}
+
+            \vspace{0.2cm}
             \textbf{Algorithm:}
             \begin{algorithmic}[1]
-                \State \textbf{Input:} $\vect{z}$, codebooks $\{VQ_1, \ldots, VQ_N\}$
-                \State $\vect{r} \leftarrow \vect{z}$ \Comment{residual}
-                \State $\vect{z}_q \leftarrow \vect{0}$
+                \State $\vect{r} \leftarrow \vect{z}$, $\vect{z}_q \leftarrow \vect{0}$
                 \For{$i = 1$ to $N$}
                     \State $\vect{z}_{q,i}, idx_i \leftarrow VQ_i(\vect{r})$
                     \State $\vect{z}_q \leftarrow \vect{z}_q + \vect{z}_{q,i}$
@@ -261,56 +282,125 @@
             \end{algorithmic}
         \end{column}
         \begin{column}{0.4\textwidth}
-            \begin{tikzpicture}[scale=0.8]
-                \node[draw, circle, fill=blue!20] (z) at (0,3) {$\vect{z}$};
-                \node[draw, rectangle, fill=yellow!30] (vq1) at (0,1.5) {$VQ_1$};
+            \begin{tikzpicture}[scale=0.75]
+                \node[draw, circle, fill=blue!20] (z) at (0,2.5) {$\vect{z}$};
+                \node[draw, rectangle, fill=yellow!30] (vq1) at (0,1.2) {$VQ_1$};
                 \node[draw, rectangle, fill=yellow!30] (vq2) at (0,0) {$VQ_2$};
-                \node[draw, rectangle, fill=yellow!30] (vq3) at (0,-1.5) {$VQ_N$};
-                \node[draw, circle, fill=green!20] (zq) at (2.5,0.75) {$\vect{z}_q$};
+                \node[draw, rectangle, fill=yellow!30] (vq3) at (0,-1.2) {$VQ_N$};
+                \node[draw, circle, fill=green!20] (zq) at (2.2,0.6) {$\vect{z}_q$};
 
                 \draw[->, thick] (z) -- (vq1);
-                \draw[->, thick, dashed] (vq1) -- node[right] {$\vect{r}_1$} (vq2);
-                \draw[->, thick, dashed] (vq2) -- node[right] {$\vect{r}_2$} (vq3);
-                \draw[->, thick] (vq1) -- node[above] {$+$} (zq);
+                \draw[->, dashed] (vq1) -- node[right, font=\tiny] {$\vect{r}$} (vq2);
+                \draw[->, dashed] (vq2) -- (vq3);
+                \draw[->, thick] (vq1) -- (zq);
                 \draw[->, thick] (vq2) -- (zq);
                 \draw[->, thick] (vq3) -- (zq);
             \end{tikzpicture}
+
+            \vspace{0.2cm}
+            \textbf{Decoding:}
+            \[
+                \vect{z}_q = \textstyle\sum_i VQ_i(idx_i)
+            \]
         \end{column}
     \end{columns}
+\end{frame}
 
-    \vspace{0.3cm}
-    \textbf{Decoding:}
-    \[
-        \vect{z}_q = \sum_{i=1}^{N} VQ_i.\text{decode}(idx_i)
-    \]
+%------------------------------------------------------------------------------
+\begin{frame}{Residual VQ: Visual Process}
+    \begin{center}
+    \begin{tikzpicture}[
+        box/.style={rectangle, draw, rounded corners, minimum width=1.4cm, minimum height=0.6cm, align=center, font=\scriptsize},
+        arrow/.style={->, thick, >=stealth},
+        scale=0.75, transform shape
+    ]
+        % Main horizontal flow - residuals
+        \node[box, fill=blue!20] (input) at (0,0) {Input $\mathbf{z}$};
+        \node[box, fill=yellow!30] (r1) at (4,0) {$\mathbf{r}_1$};
+        \node[box, fill=yellow!30] (r2) at (8,0) {$\mathbf{r}_2$};
+        \node[box, fill=gray!20] (r3) at (12,0) {$\mathbf{r}_3 \approx 0$};
+
+        % Codebooks above
+        \node[box, fill=codebookpink] (cb1) at (2,1.8) {Codebook 1};
+        \node[box, fill=codebookpink] (cb2) at (6,1.8) {Codebook 2};
+        \node[box, fill=codebookpink] (cb3) at (10,1.8) {Codebook 3};
+
+        % Quantized values below codebooks
+        \node[box, fill=vqpurple!30] (q1) at (2,3.5) {$\hat{\mathbf{z}}_1$};
+        \node[box, fill=vqpurple!30] (q2) at (6,3.5) {$\hat{\mathbf{z}}_2$};
+        \node[box, fill=vqpurple!30] (q3) at (10,3.5) {$\hat{\mathbf{z}}_3$};
+
+        % Final output
+        \node[box, fill=rdtgreen!30] (output) at (13,3.5) {$\sum_i \hat{\mathbf{z}}_i$};
+
+        % Arrows - main flow (input to residuals via codebooks)
+        \draw[arrow] (input) -- (cb1);
+        \draw[arrow] (cb1) -- (q1);
+        \draw[arrow] (cb1) -- (r1);
+
+        \draw[arrow] (r1) -- (cb2);
+        \draw[arrow] (cb2) -- (q2);
+        \draw[arrow] (cb2) -- (r2);
+
+        \draw[arrow] (r2) -- (cb3);
+        \draw[arrow] (cb3) -- (q3);
+        \draw[arrow] (cb3) -- (r3);
+
+        % Arrows - quantized to sum (horizontal at top)
+        \draw[arrow] (q1) -- (q2);
+        \draw[arrow] (q2) -- (q3);
+        \draw[arrow] (q3) -- (output);
+
+        % Label for sum path
+        \node[font=\tiny, above] at (4,3.5) {+};
+        \node[font=\tiny, above] at (8,3.5) {+};
+
+        % Residual magnitude bar chart
+        \begin{scope}[shift={(0,-2.5)}]
+            \draw[->] (0,0) -- (11,0) node[right, font=\scriptsize] {Stage};
+            \draw[->] (0,0) -- (0,1.3) node[above, font=\scriptsize] {$\|\mathbf{r}\|$};
+            \fill[blue!40] (1,0) rectangle (2.2,1.0);
+            \fill[blue!40] (4,0) rectangle (5.2,0.5);
+            \fill[blue!40] (7,0) rectangle (8.2,0.25);
+            \fill[blue!40] (10,0) rectangle (11.2,0.08);
+            \node[font=\tiny] at (1.6,-0.25) {Input};
+            \node[font=\tiny] at (4.6,-0.25) {After 1};
+            \node[font=\tiny] at (7.6,-0.25) {After 2};
+            \node[font=\tiny] at (10.6,-0.25) {After 3};
+        \end{scope}
+    \end{tikzpicture}
+    \end{center}
 \end{frame}
 
 %------------------------------------------------------------------------------
 \begin{frame}{RVQ: Mathematical Formulation}
-    \textbf{Encoding (per timestep):}
-    \begin{align*}
-        \vect{r}^{(0)} &= \vect{z} \\
-        \vect{z}_{q}^{(i)}, idx^{(i)} &= VQ_i(\vect{r}^{(i-1)}) \\
-        \vect{r}^{(i)} &= \vect{r}^{(i-1)} - \vect{z}_{q}^{(i)}
-    \end{align*}
+    \begin{columns}[T]
+        \begin{column}{0.5\textwidth}
+            \textbf{Encoding (per timestep):}
+            \begin{align*}
+                \vect{r}^{(0)} &= \vect{z} \\
+                \vect{z}_{q}^{(i)}, idx^{(i)} &= VQ_i(\vect{r}^{(i-1)}) \\
+                \vect{r}^{(i)} &= \vect{r}^{(i-1)} - \vect{z}_{q}^{(i)}
+            \end{align*}
 
-    \vspace{0.3cm}
-    \textbf{Final Output:}
-    \[
-        \boxed{\vect{z}_q = \sum_{i=1}^{N} \vect{z}_{q}^{(i)}}
-    \]
+            \textbf{Final Output:}
+            \[
+                \boxed{\vect{z}_q = \sum_{i=1}^{N} \vect{z}_{q}^{(i)}}
+            \]
+        \end{column}
+        \begin{column}{0.5\textwidth}
+            \textbf{Loss Aggregation:}
+            \[
+                \mathcal{L}_{\text{RVQ}} = \sum_{i=1}^{N} \mathcal{L}_{\text{VQ}}^{(i)}
+            \]
 
-    \vspace{0.3cm}
-    \textbf{Loss Aggregation:}
-    \[
-        \mathcal{L}_{\text{RVQ}} = \sum_{i=1}^{N} \mathcal{L}_{\text{VQ}}^{(i)}
-    \]
-
-    \vspace{0.3cm}
-    \begin{block}{Token Sequence}
-        For $N$ codebooks: output is $N$ tokens per timestep \\
-        Each token $\in \{0, 1, \ldots, Z-1\}$ where $Z = 1024$
-    \end{block}
+            \vspace{0.3cm}
+            \begin{block}{Token Sequence}
+                $N$ codebooks $\rightarrow$ $N$ tokens/timestep \\
+                Each token $\in \{0, \ldots, 1023\}$
+            \end{block}
+        \end{column}
+    \end{columns}
 \end{frame}
 
 %------------------------------------------------------------------------------
@@ -320,31 +410,32 @@
     \vspace{0.3cm}
     \begin{center}
     \begin{tikzpicture}[
-        block/.style={rectangle, draw, rounded corners, minimum width=2cm, minimum height=0.6cm, align=center, font=\scriptsize},
-        arrow/.style={->, thick}
+        block/.style={rectangle, draw, rounded corners, minimum width=1.8cm, minimum height=0.6cm, align=center, font=\scriptsize},
+        arrow/.style={->, thick},
+        scale=0.85, transform shape
     ]
         % Input
         \node[block, fill=blue!20] (input) at (0,0) {Input\\$[B, 20, 24]$};
 
         % Conv in
-        \node[block, fill=gray!20] (conv_in) at (2.5,0) {Conv1d\\$k{=}3$};
-        \node[block, fill=blue!20] (c1) at (5,0) {$[B, 64, 24]$};
+        \node[block, fill=gray!20] (conv_in) at (2.3,0) {Conv1d\\$k{=}3$};
+        \node[block, fill=blue!20] (c1) at (4.6,0) {$[B, 64, 24]$};
 
         % Down block 1
-        \node[block, fill=orange!30] (down1) at (7.5,0) {Down1\\$\downarrow 2$};
-        \node[block, fill=blue!20] (c2) at (10,0) {$[B, 128, 12]$};
+        \node[block, fill=orange!30] (down1) at (6.9,0) {Down1\\$\downarrow 2$};
+        \node[block, fill=blue!20] (c2) at (9.2,0) {$[B, 128, 12]$};
 
         % Down block 2
         \node[block, fill=orange!30] (down2) at (0,-1.5) {Down2\\$\downarrow 2$};
-        \node[block, fill=blue!20] (c3) at (2.5,-1.5) {$[B, 256, 6]$};
+        \node[block, fill=blue!20] (c3) at (2.3,-1.5) {$[B, 256, 6]$};
 
         % Down block 3
-        \node[block, fill=orange!30] (down3) at (5,-1.5) {Down3\\$\downarrow 2$};
-        \node[block, fill=blue!20] (c4) at (7.5,-1.5) {$[B, 512, 3]$};
+        \node[block, fill=orange!30] (down3) at (4.6,-1.5) {Down3\\$\downarrow 2$};
+        \node[block, fill=blue!20] (c4) at (6.9,-1.5) {$[B, 512, 3]$};
 
         % Conv out
-        \node[block, fill=gray!20] (conv_out) at (10,-1.5) {Conv1d\\$k{=}3$};
-        \node[block, fill=green!30] (output) at (12.5,-1.5) {Output\\$[B, 64, 3]$};
+        \node[block, fill=gray!20] (conv_out) at (9.2,-1.5) {Conv1d\\$k{=}3$};
+        \node[block, fill=green!30] (output) at (11.5,-1.5) {Output\\$[B, 64, 3]$};
 
         \draw[arrow] (input) -- (conv_in);
         \draw[arrow] (conv_in) -- (c1);
@@ -375,31 +466,32 @@
     \vspace{0.3cm}
     \begin{center}
     \begin{tikzpicture}[
-        block/.style={rectangle, draw, rounded corners, minimum width=2cm, minimum height=0.6cm, align=center, font=\scriptsize},
-        arrow/.style={->, thick}
+        block/.style={rectangle, draw, rounded corners, minimum width=1.8cm, minimum height=0.6cm, align=center, font=\scriptsize},
+        arrow/.style={->, thick},
+        scale=0.85, transform shape
     ]
         % Input
         \node[block, fill=green!30] (input) at (0,0) {Input\\$[B, 64, 3]$};
 
         % Conv in
-        \node[block, fill=gray!20] (conv_in) at (2.5,0) {Conv1d\\$k{=}3$};
-        \node[block, fill=blue!20] (c1) at (5,0) {$[B, 512, 3]$};
+        \node[block, fill=gray!20] (conv_in) at (2.3,0) {Conv1d\\$k{=}3$};
+        \node[block, fill=blue!20] (c1) at (4.6,0) {$[B, 512, 3]$};
 
         % Up block 1
-        \node[block, fill=rdtgreen!30] (up1) at (7.5,0) {Up1\\$\uparrow 2$};
-        \node[block, fill=blue!20] (c2) at (10,0) {$[B, 256, 6]$};
+        \node[block, fill=rdtgreen!30] (up1) at (6.9,0) {Up1\\$\uparrow 2$};
+        \node[block, fill=blue!20] (c2) at (9.2,0) {$[B, 256, 6]$};
 
         % Up block 2
         \node[block, fill=rdtgreen!30] (up2) at (0,-1.5) {Up2\\$\uparrow 2$};
-        \node[block, fill=blue!20] (c3) at (2.5,-1.5) {$[B, 128, 12]$};
+        \node[block, fill=blue!20] (c3) at (2.3,-1.5) {$[B, 128, 12]$};
 
         % Up block 3
-        \node[block, fill=rdtgreen!30] (up3) at (5,-1.5) {Up3\\$\uparrow 2$};
-        \node[block, fill=blue!20] (c4) at (7.5,-1.5) {$[B, 64, 24]$};
+        \node[block, fill=rdtgreen!30] (up3) at (4.6,-1.5) {Up3\\$\uparrow 2$};
+        \node[block, fill=blue!20] (c4) at (6.9,-1.5) {$[B, 64, 24]$};
 
         % Conv out
-        \node[block, fill=gray!20] (conv_out) at (10,-1.5) {Conv1d\\$k{=}3$};
-        \node[block, fill=blue!20] (output) at (12.5,-1.5) {Output\\$[B, 20, 24]$};
+        \node[block, fill=gray!20] (conv_out) at (9.2,-1.5) {Conv1d\\$k{=}3$};
+        \node[block, fill=blue!20] (output) at (11.5,-1.5) {Output\\$[B, 20, 24]$};
 
         \draw[arrow] (input) -- (conv_in);
         \draw[arrow] (conv_in) -- (c1);
@@ -432,26 +524,27 @@
     \vspace{0.3cm}
     \begin{center}
     \begin{tikzpicture}[
-        box/.style={rectangle, draw, rounded corners, minimum width=2.5cm, minimum height=0.8cm, align=center},
-        arrow/.style={->, thick}
+        box/.style={rectangle, draw, rounded corners, minimum width=2.2cm, minimum height=0.8cm, align=center, font=\small},
+        arrow/.style={->, thick},
+        scale=0.85, transform shape
     ]
         % Input
         \node[box, fill=blue!20] (input) at (0,0) {Action\\$[B, 24, 20]$};
 
         % Split
-        \node[box, fill=encoderblue!30] (pos) at (4,1.2) {Position\\$[B, 24, 6]$};
-        \node[box, fill=vqpurple!30] (rot) at (4,0) {Rotation\\$[B, 24, 12]$};
-        \node[box, fill=actionorange!30] (grip) at (4,-1.2) {Gripper\\$[B, 24, 2]$};
+        \node[box, fill=encoderblue!30] (pos) at (3.5,1.2) {Position\\$[B, 24, 6]$};
+        \node[box, fill=vqpurple!30] (rot) at (3.5,0) {Rotation\\$[B, 24, 12]$};
+        \node[box, fill=actionorange!30] (grip) at (3.5,-1.2) {Gripper\\$[B, 24, 2]$};
 
         % VQVAEs
-        \node[box, fill=yellow!30] (vq_pos) at (8,1.2) {VQVAE$_\text{pos}$\\6 codebooks};
-        \node[box, fill=yellow!30] (vq_rot) at (8,0) {VQVAE$_\text{rot}$\\3 codebooks};
-        \node[box, fill=yellow!30] (vq_grip) at (8,-1.2) {VQVAE$_\text{grip}$\\1 codebook};
+        \node[box, fill=yellow!30] (vq_pos) at (7,1.2) {VQVAE$_\text{pos}$\\6 codebooks};
+        \node[box, fill=yellow!30] (vq_rot) at (7,0) {VQVAE$_\text{rot}$\\3 codebooks};
+        \node[box, fill=yellow!30] (vq_grip) at (7,-1.2) {VQVAE$_\text{grip}$\\1 codebook};
 
         % Tokens
-        \node[box, fill=green!30] (tok_pos) at (12,1.2) {18 tokens};
-        \node[box, fill=green!30] (tok_rot) at (12,0) {9 tokens};
-        \node[box, fill=green!30] (tok_grip) at (12,-1.2) {3 tokens};
+        \node[box, fill=green!30] (tok_pos) at (10.5,1.2) {18 tokens};
+        \node[box, fill=green!30] (tok_rot) at (10.5,0) {9 tokens};
+        \node[box, fill=green!30] (tok_grip) at (10.5,-1.2) {3 tokens};
 
         \draw[arrow] (input) -- (pos);
         \draw[arrow] (input) -- (rot);
@@ -499,70 +592,74 @@
 
 %------------------------------------------------------------------------------
 \begin{frame}{Action Dimension Mapping}
-    \textbf{20-dim Bimanual Action $\rightarrow$ 3 Components:}
+    \begin{columns}[T]
+        \begin{column}{0.5\textwidth}
+            \textbf{20-dim $\rightarrow$ 3 Components:}
+            \begin{table}
+                \centering
+                \renewcommand{\arraystretch}{1.2}
+                \footnotesize
+                \begin{tabular}{lcc}
+                    \toprule
+                    & \textbf{Right} & \textbf{Left} \\
+                    \midrule
+                    Position & [0:3] & [10:13] \\
+                    Rotation & [3:9] & [13:19] \\
+                    Gripper & [9] & [19] \\
+                    \bottomrule
+                \end{tabular}
+            \end{table}
+        \end{column}
+        \begin{column}{0.5\textwidth}
+            \textbf{Code Implementation:}
+            \begin{itemize}
+                \item \code{select\_act\_dim(x, 'pos')}
+                \item \code{select\_act\_dim(x, 'rot')}
+                \item \code{select\_act\_dim(x, 'grip')}
+            \end{itemize}
 
-    \vspace{0.5cm}
-    \begin{table}
-        \centering
-        \renewcommand{\arraystretch}{1.3}
-        \begin{tabular}{lcc}
-            \toprule
-            \textbf{Component} & \textbf{Right Arm Indices} & \textbf{Left Arm Indices} \\
-            \midrule
-            Position (6D) & [0, 1, 2] & [10, 11, 12] \\
-            Rotation (12D) & [3, 4, 5, 6, 7, 8] & [13, 14, 15, 16, 17, 18] \\
-            Gripper (2D) & [9] & [19] \\
-            \bottomrule
-        \end{tabular}
-    \end{table}
-
-    \vspace{0.5cm}
-    \textbf{Code Implementation:}
-    \begin{itemize}
-        \item \code{select\_act\_dim(x, 'pos')}: Extract [0:3, 10:13]
-        \item \code{select\_act\_dim(x, 'rot')}: Extract [3:9, 13:19]
-        \item \code{select\_act\_dim(x, 'grip')}: Extract [9, 19]
-    \end{itemize}
-
-    \vspace{0.3cm}
-    \textbf{Reconstruction:}
-    \begin{itemize}
-        \item \code{apply\_act\_dim(x, y, 'pos')}: Insert at [0:3, 10:13]
-        \item Same for rotation and gripper
-    \end{itemize}
+            \vspace{0.2cm}
+            \textbf{Reconstruction:}
+            \begin{itemize}
+                \item \code{apply\_act\_dim(x, y, type)}
+            \end{itemize}
+        \end{column}
+    \end{columns}
 \end{frame}
 
 %------------------------------------------------------------------------------
 \begin{frame}{Token Conversion: VLA $\leftrightarrow$ VAE}
-    \begin{block}{Problem}
-        VLA vocabulary tokens $\neq$ VAE codebook indices
-    \end{block}
+    \begin{columns}[T]
+        \begin{column}{0.5\textwidth}
+            \begin{block}{Problem}
+                VLA tokens $\neq$ VAE indices
+            \end{block}
 
-    \vspace{0.5cm}
-    \textbf{VLA to VAE Conversion:}
-    \[
-        \boxed{t_{\text{vae}} = V_{\text{vocab}} - (t_{\text{vla}} + 1)}
-    \]
+            \vspace{0.3cm}
+            \textbf{VLA to VAE:}
+            \[
+                \boxed{t_{\text{vae}} = V - (t_{\text{vla}} + 1)}
+            \]
 
-    \vspace{0.3cm}
-    \textbf{VAE to VLA Conversion:}
-    \[
-        \boxed{t_{\text{vla}} = V_{\text{vocab}} - t_{\text{vae}} - 1}
-    \]
+            \textbf{VAE to VLA:}
+            \[
+                \boxed{t_{\text{vla}} = V - t_{\text{vae}} - 1}
+            \]
 
-    \vspace{0.3cm}
-    where $V_{\text{vocab}} = 152064$ (Qwen2.5-VL vocabulary size)
+            {\small $V = 152064$ (vocab size)}
+        \end{column}
+        \begin{column}{0.5\textwidth}
+            \textbf{Clamping:}
+            \[
+                t_{\text{vae}} = \text{clamp}(t_{\text{vae}}, 0, 1023)
+            \]
 
-    \vspace{0.5cm}
-    \textbf{Clamping for Valid Range:}
-    \[
-        t_{\text{vae}} = \text{clamp}(t_{\text{vae}}, 0, Z-1)
-    \]
-    where $Z = 1024$ (codebook size)
-
-    \begin{alertblock}{Note}
-        Invalid tokens (out of range) indicate generation errors
-    \end{alertblock}
+            \vspace{0.3cm}
+            \begin{alertblock}{Note}
+                Invalid tokens indicate generation errors
+            \end{alertblock}
+        \end{column}
+    \end{columns}
 \end{frame}
 
 %------------------------------------------------------------------------------
@@ -616,11 +713,11 @@
 \end{frame}
 
 %------------------------------------------------------------------------------
-\begin{frame}{Codebook Parameters}
+\begin{frame}{Codebook Parameters (1/2)}
     \begin{table}
         \centering
-        \renewcommand{\arraystretch}{1.4}
-        \begin{tabular}{lccccc}
+        \renewcommand{\arraystretch}{1.3}
+        \begin{tabular}{lccc}
             \toprule
             \textbf{Parameter} & \textbf{Position} & \textbf{Rotation} & \textbf{Gripper} \\
             \midrule
@@ -629,6 +726,20 @@
             Embedding dim ($E$) & 256 & 256 & 256 \\
             Codebook size ($Z$) & 1024 & 1024 & 1024 \\
             Num codebooks ($N$) & 6 & 3 & 1 \\
+            \bottomrule
+        \end{tabular}
+    \end{table}
+\end{frame}
+
+%------------------------------------------------------------------------------
+\begin{frame}{Codebook Parameters (2/2)}
+    \textbf{Token Output Summary:}
+    \begin{table}
+        \centering
+        \renewcommand{\arraystretch}{1.3}
+        \begin{tabular}{lccc}
+            \toprule
+            & \textbf{Position} & \textbf{Rotation} & \textbf{Gripper} \\
             \midrule
             Tokens per timestep & 6 & 3 & 1 \\
             Timesteps & 3 & 3 & 3 \\
@@ -637,7 +748,7 @@
         \end{tabular}
     \end{table}
 
-    \vspace{0.3cm}
+    \vspace{0.5cm}
     \begin{block}{Default Hyperparameters}
         \begin{itemize}
             \item EMA decay: $\gamma = 0.99$
@@ -648,7 +759,7 @@
 \end{frame}
 
 %------------------------------------------------------------------------------
-\begin{frame}{VQVAE Loss Components}
+\begin{frame}{VQVAE Loss Components (1/2)}
     \textbf{Total Training Loss:}
     \[
         \mathcal{L}_{\text{total}} = \mathcal{L}_{\text{recon}} + \mathcal{L}_{\text{VQ}}
@@ -661,27 +772,39 @@
               \[ \mathcal{L}_{\text{pos}} = \|\hat{\vect{p}} - \vect{p}\|^2 \]
         \item Rotation: Geodesic loss (6D representation)
               \[ \mathcal{L}_{\text{rot}} = \arccos\left(\frac{\text{tr}(\mat{R}_{\text{pred}}^T \mat{R}_{\text{gt}}) - 1}{2}\right) \]
+    \end{itemize}
+\end{frame}
+
+%------------------------------------------------------------------------------
+\begin{frame}{VQVAE Loss Components (2/2)}
+    \textbf{1. Reconstruction Loss (continued):}
+    \begin{itemize}
         \item Gripper: MSE loss
               \[ \mathcal{L}_{\text{grip}} = \|\hat{g} - g\|^2 \]
     \end{itemize}
 
-    \vspace{0.3cm}
+    \vspace{0.5cm}
     \textbf{2. VQ Loss:}
     \[
         \mathcal{L}_{\text{VQ}} = \sum_{c \in \{\text{pos}, \text{rot}, \text{grip}\}} \mathcal{L}_{\text{VQ}}^{(c)}
     \]
+
+    \vspace{0.3cm}
+    \begin{block}{Total Loss}
+        \[
+            \mathcal{L}_{\text{total}} = \mathcal{L}_{\text{pos}} + \mathcal{L}_{\text{rot}} + \mathcal{L}_{\text{grip}} + \mathcal{L}_{\text{VQ}}
+        \]
+    \end{block}
 \end{frame}
 
 %------------------------------------------------------------------------------
-\begin{frame}{HuggingFace Model}
+\begin{frame}[fragile]{HuggingFace Model (1/2)}
     \textbf{Model Location:}
-
-    \vspace{0.3cm}
     \code{robotics-diffusion-transformer/RVQActionTokenizer}
 
     \vspace{0.5cm}
     \textbf{Loading in Code:}
-    \begin{lstlisting}[language=Python, basicstyle=\ttfamily\small]
+    \begin{lstlisting}[language=Python]
 from vqvae.models.multivqvae import MultiVQVAE
 
 vae = MultiVQVAE.from_pretrained(
@@ -689,8 +812,10 @@ vae = MultiVQVAE.from_pretrained(
 )
 vae = vae.to("cuda").float()
     \end{lstlisting}
+\end{frame}
 
-    \vspace{0.5cm}
+%------------------------------------------------------------------------------
+\begin{frame}{HuggingFace Model (2/2)}
     \textbf{Key Attributes:}
     \begin{itemize}
         \item \code{vae.pos\_id\_len} = 18
@@ -701,9 +826,9 @@ vae = vae.to("cuda").float()
 \end{frame}
 
 %------------------------------------------------------------------------------
-\begin{frame}{Encode/Decode Example}
+\begin{frame}[fragile]{Encode/Decode Example (1/2)}
     \textbf{Encoding Actions to Tokens:}
-    \begin{lstlisting}[language=Python, basicstyle=\ttfamily\small]
+    \begin{lstlisting}[language=Python]
 # actions: [B, 24, 20] - normalized action chunk
 with torch.no_grad():
     tokens = vae.encode(actions)  # [B, 27]
@@ -711,15 +836,17 @@ with torch.no_grad():
 
     \vspace{0.5cm}
     \textbf{Decoding Tokens to Actions:}
-    \begin{lstlisting}[language=Python, basicstyle=\ttfamily\small]
+    \begin{lstlisting}[language=Python]
 # tokens: [B, 27] - from VLA generation
 with torch.no_grad():
     actions_recon = vae.decode(tokens)  # [B, 24, 20]
     \end{lstlisting}
+\end{frame}
 
-    \vspace{0.5cm}
+%------------------------------------------------------------------------------
+\begin{frame}[fragile]{Encode/Decode Example (2/2)}
     \textbf{Component-wise Decoding:}
-    \begin{lstlisting}[language=Python, basicstyle=\ttfamily\small]
+    \begin{lstlisting}[language=Python]
 result = vae.decode(tokens, return_dict=True)
 # result['pos']: [B, 24, 6]
 # result['rot']: [B, 24, 12]
@@ -728,7 +855,7 @@ result = vae.decode(tokens, return_dict=True)
 \end{frame}
 
 %------------------------------------------------------------------------------
-\begin{frame}{VQVAE Summary}
+\begin{frame}{VQVAE Summary (1/2)}
     \begin{columns}[T]
         \begin{column}{0.5\textwidth}
             \textbf{Key Techniques:}
@@ -752,8 +879,10 @@ result = vae.decode(tokens, return_dict=True)
             \end{itemize}
         \end{column}
     \end{columns}
+\end{frame}
 
-    \vspace{0.5cm}
+%------------------------------------------------------------------------------
+\begin{frame}{VQVAE Summary (2/2)}
     \begin{alertblock}{Comparison with Prior Methods}
         \begin{itemize}
             \item ACT: 256 tokens per chunk
@@ -762,5 +891,14 @@ result = vae.decode(tokens, return_dict=True)
             \item $\mathbf{3\text{--}8\times}$ \textbf{shorter token sequences}
         \end{itemize}
     \end{alertblock}
+
+    \vspace{0.5cm}
+    \begin{block}{Key Benefits}
+        \begin{itemize}
+            \item Faster autoregressive generation
+            \item Lower compute requirements
+            \item Unified bimanual action representation
+        \end{itemize}
+    \end{block}
 \end{frame}
 

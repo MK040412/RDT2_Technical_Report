@@ -42,6 +42,8 @@
 \usepackage{multirow}
 \usepackage{array}
 \usepackage{mathtools}
+\usepackage{algorithm}
+\usepackage{algpseudocode}
 
 % TikZ Libraries
 \usetikzlibrary{
@@ -73,11 +75,11 @@
 \definecolor{backcolor}{RGB}{248, 248, 248}
 
 %==============================================================================
-% CODE LISTINGS
+% CODE LISTINGS (scaled to ~0.7x for better fit)
 %==============================================================================
 \lstset{
     language=Python,
-    basicstyle=\ttfamily\footnotesize,
+    basicstyle=\ttfamily\scriptsize,
     keywordstyle=\color{blue}\bfseries,
     commentstyle=\color{codegreen},
     stringstyle=\color{red!70!black},
@@ -88,15 +90,20 @@
     numbers=left,
     numberstyle=\tiny\color{codegray},
     tabsize=4,
-    xleftmargin=6mm,
-    framexleftmargin=6mm,
-    aboveskip=3mm,
-    belowskip=3mm
+    xleftmargin=5mm,
+    framexleftmargin=5mm,
+    aboveskip=2mm,
+    belowskip=2mm,
+    columns=flexible
 }
 
 %==============================================================================
 % CUSTOM COMMANDS
 %==============================================================================
+% Math operators
+\DeclareMathOperator{\argmin}{argmin}
+\DeclareMathOperator{\argmax}{argmax}
+
 % Math
 \newcommand{\vect}[1]{\bm{#1}}
 \newcommand{\mat}[1]{\mathbf{#1}}
@@ -135,28 +142,11 @@
 % Include all parts
 \input{part1_introduction}
 \input{part2_data}
-% TODO: Create these files
-% \input{part3_vqvae}
-% \input{part4_rdt2vq}
-% \input{part5_rdt2fm}
-% \input{part6_training}
-% \input{part7_inference}
-% \input{part8_debugging}
-
-% Final slide
-\begin{frame}{}
-    \centering
-    \vspace{2cm}
-    {\Huge\bfseries Thank You}
-
-    \vspace{1.5cm}
-    {\Large Questions?}
-
-    \vspace{1.5cm}
-    \begin{tabular}{ll}
-        GitHub: & \url{https://github.com/thu-ml/RDT2} \\
-        Project: & \url{https://rdt-robotics.github.io/rdt2/} \\
-    \end{tabular}
-\end{frame}
+\input{part3_vqvae}
+\input{part4_rdt2vq}
+\input{part5_rdt2fm}
+\input{part6_training}
+\input{part7_inference}
+\input{part8_debugging}
 
 \end{document}

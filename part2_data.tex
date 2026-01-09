@@ -234,7 +234,7 @@
     \textbf{Contents of \texttt{N.meta.json}:}
 
     \vspace{0.5cm}
-\begin{lstlisting}[basicstyle=\ttfamily\small]
+\begin{lstlisting}
 {
     "sub_task_instruction_key": "/path/to/instruction"
 }
@@ -505,6 +505,64 @@ def geodesic_loss(R_pred, R_gt, eps=1e-7):
         \item Row $i$: action at timestep $i$ (20 dimensions)
         \item Column $j$: dimension $j$ across all timesteps
     \end{itemize}
+\end{frame}
+
+%------------------------------------------------------------------------------
+\begin{frame}{Action Chunk: Visual Timeline}
+    \begin{center}
+    \begin{tikzpicture}[scale=0.8, transform shape]
+        % Time axis
+        \draw[->] (0,0) -- (13.5,0) node[right, font=\small] {Time (s)};
+        \draw[->] (0,0) -- (0,4.2) node[above, font=\small] {Action Dims};
+
+        % Time markers
+        \foreach \x/\t in {0/0, 3.25/0.2, 6.5/0.4, 9.75/0.6, 13/0.8} {
+            \draw (\x,-0.1) -- (\x,0.1);
+            \node[below, font=\tiny] at (\x,-0.1) {\t};
+        }
+
+        % Frame markers (24 frames)
+        \foreach \i in {0,...,23} {
+            \pgfmathsetmacro{\x}{\i * 13 / 23}
+            \draw[gray!40] (\x,0) -- (\x,3.8);
+        }
+
+        % Position component
+        \begin{scope}[shift={(0,2.8)}]
+            \node[left, font=\scriptsize] at (-0.2,0.4) {Position};
+            \fill[blue!25] (0,0) rectangle (13,0.7);
+            \draw[blue!70, thick] plot[smooth] coordinates {
+                (0,0.35) (2,0.45) (4,0.5) (6,0.4) (8,0.5) (10,0.55) (13,0.4)
+            };
+            \node[right, font=\tiny, blue!70] at (13.1,0.35) {[6]};
+        \end{scope}
+
+        % Rotation component
+        \begin{scope}[shift={(0,1.7)}]
+            \node[left, font=\scriptsize] at (-0.2,0.4) {Rotation};
+            \fill[rdtgreen!25] (0,0) rectangle (13,0.7);
+            \draw[rdtgreen!70, thick] plot[smooth] coordinates {
+                (0,0.3) (2,0.4) (4,0.5) (6,0.45) (8,0.35) (10,0.4) (13,0.35)
+            };
+            \node[right, font=\tiny, rdtgreen!70] at (13.1,0.35) {[12]};
+        \end{scope}
+
+        % Gripper component
+        \begin{scope}[shift={(0,0.6)}]
+            \node[left, font=\scriptsize] at (-0.2,0.4) {Gripper};
+            \fill[actionorange!25] (0,0) rectangle (13,0.7);
+            \draw[actionorange!80, thick] (0,0.2) -- (4,0.2) -- (4,0.6) -- (9,0.6) -- (9,0.2) -- (13,0.2);
+            \node[right, font=\tiny, actionorange!80] at (13.1,0.35) {[2]};
+        \end{scope}
+
+        % Brace annotation
+        \draw[decorate, decoration={brace, amplitude=4pt}] (0,4) -- (13,4)
+            node[midway, above=4pt, font=\scriptsize] {24 frames @ 30fps};
+    \end{tikzpicture}
+    \end{center}
+
+    \vspace{0.2cm}
+    \textbf{Total:} 20 dimensions (bimanual: 10 per arm)
 \end{frame}
 
 %------------------------------------------------------------------------------
